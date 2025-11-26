@@ -1,8 +1,12 @@
 import { config as loadEnv } from "dotenv";
-import { decode as decodeJwt, JwtPayload } from "jsonwebtoken";
+import {
+  decode as decodeJwt,
+  JwtPayload,
+  Secret,
+  verify as verifyJwt,
+} from "jsonwebtoken";
+import type { VerifyOptions } from "jsonwebtoken";
 import { fileURLToPath } from "node:url";
-
-loadEnv({ path: ".env.local" });
 
 const TOKEN_URL = "https://platform.ai.gloo.com/oauth2/token";
 const CHAT_URL = "https://platform.ai.gloo.com/ai/v1/chat/completions";
@@ -42,10 +46,15 @@ function requireEnv(name: string): string {
   return value;
 }
 
-function withTimeout(initMs: number): AbortController {
+function withTimeout(initMs: number): {
+  controller: AbortController;
+  clearTimer: () => void;
+} {
   const controller = new AbortController();
-  setTimeout(() => controller.abort(), initMs).unref();
-  return controller;
+  const timeout = setTimeout(() => controller.abort(), initMs);
+  timeout.unref();
+
+  return { controller, clearTimer: () => clearTimeout(timeout) };
 }
 
 async function fetchJson<TResponse>(
@@ -53,15 +62,20 @@ async function fetchJson<TResponse>(
   init: RequestInit,
   timeoutMs: number
 ): Promise<TResponse> {
-  const controller = withTimeout(timeoutMs);
-  const response = await fetch(url, { ...init, signal: controller.signal });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(
-      `Request to ${url} failed with status ${response.status}: ${text}`
-    );
+  const { controller, clearTimer } = withTimeout(timeoutMs);
+
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(
+        `Request to ${url} failed with status ${response.status}: ${text}`
+      );
+    }
+    return (await response.json()) as TResponse;
+  } finally {
+    clearTimer();
   }
-  return (await response.json()) as TResponse;
 }
 
 export function loadCredentials(): Credentials {
@@ -76,7 +90,7 @@ export async function getAccessToken({
   clientSecret,
 }: Credentials): Promise<TokenResponse> {
   const encodedCredentials = Buffer.from(
-    `${clientId}:${clientSecret}`
+    `${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`
   ).toString("base64");
 
   return fetchJson<TokenResponse>(
@@ -96,12 +110,34 @@ export async function getAccessToken({
   );
 }
 
-export function describeExpiration(accessToken: string): number | null {
-  const decoded = decodeJwt(accessToken) as JwtPayload | null;
-  if (!decoded || typeof decoded.exp !== "number") {
+/**
+ * Returns the exp claim from an access token.
+ * When no verification key is provided the value is informational only.
+ * Pass verification options (algorithms/issuer/audience, etc.) to constrain
+ * which tokens will be accepted when a verification key is supplied.
+ */
+export function describeExpiration(
+  accessToken: string,
+  verificationKey?: Secret,
+  verificationOptions?: VerifyOptions
+): number | null {
+  try {
+    const payload = verificationKey
+      ? (verifyJwt(
+          accessToken,
+          verificationKey,
+          verificationOptions
+        ) as JwtPayload)
+      : (decodeJwt(accessToken) as JwtPayload | null);
+
+    if (!payload || typeof payload.exp !== "number") {
+      return null;
+    }
+
+    return payload.exp;
+  } catch {
     return null;
   }
-  return decoded.exp;
 }
 
 export async function getChatCompletion(
@@ -145,7 +181,9 @@ export async function runExample(
 
   const expiration = describeExpiration(accessToken);
   console.log(
-    `Token expires at (unix seconds): ${expiration ?? "unknown (missing exp)"}`
+    `Token expires at (unix seconds, not verified): ${
+      expiration ?? "unknown (missing exp)"
+    }`
   );
 
   const completion = await getChatCompletion(accessToken, prompt);
@@ -155,6 +193,8 @@ export async function runExample(
 const isEntryPoint = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isEntryPoint) {
+  loadEnv({ path: ".env.local" });
+
   runExample().catch((error) => {
     console.error("Error running chat example:", error);
     process.exitCode = 1;
