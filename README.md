@@ -4,8 +4,8 @@ This example loads Gloo AI client credentials from `.env.local`, requests a clie
 
 ## Setup
 
-1. Use Node.js 20+ with pnpm (`corepack enable pnpm` if needed).
-2. Get your client ID and secret from https://studio.ai.gloo.com/build/keys, then copy `.env.example` to `.env.local` and fill in `GLOO_AI_CLIENT_ID` and `GLOO_AI_CLIENT_SECRET`.
+1. Use Node.js LTS with pnpm (`corepack enable pnpm` if needed). An `.nvmrc` pin of `lts/*` is provided.
+2. Get your client ID and secret from https://studio.ai.gloo.com/build/keys, then copy `.env.example` to `.env.local` (kept out of git) and fill in `GLOO_AI_CLIENT_ID` and `GLOO_AI_CLIENT_SECRET`.
 3. Install dependencies:
    ```bash
    pnpm install
@@ -17,7 +17,7 @@ This example loads Gloo AI client credentials from `.env.local`, requests a clie
 pnpm glooai:chat
 ```
 
-This invokes `src/index.ts`, fetches an access token from `https://platform.ai.gloo.com/oauth2/token`, and calls `https://platform.ai.gloo.com/ai/v1/chat/completions` with `meta.llama3-70b-instruct-v1:0`. To reuse the helpers or supply a custom prompt programmatically:
+This invokes `src/index.ts`, fetches an access token from `https://platform.ai.gloo.com/oauth2/token` with the `api/access` scope, and calls `https://platform.ai.gloo.com/ai/v1/chat/completions` using `meta.llama3-70b-instruct-v1:0`. The CLI path loads `.env.local` for you, while library consumers should provide credentials via `process.env`. To reuse the helpers or supply a custom prompt programmatically:
 
 ```ts
 import { getAccessToken, getChatCompletion, runExample } from "./src/index";
