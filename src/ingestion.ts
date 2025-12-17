@@ -153,8 +153,8 @@ async function main(): Promise<void> {
   const filePaths = process.argv.slice(2);
 
   if (filePaths.length === 0) {
-    console.error("Usage: pnpm ingest <file1> [file2] [file3] ...");
-    console.error("Example: pnpm ingest ./test-files/sample1.txt");
+    console.error("Usage: pnpm glooai:ingest <file1> [file2] [file3] ...");
+    console.error("Example: pnpm glooai:ingest ./test-files/sample1.txt");
     process.exitCode = 1;
     return;
   }

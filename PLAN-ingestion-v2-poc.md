@@ -133,7 +133,7 @@ A CLI script that:
 **Usage:**
 
 ```bash
-pnpm ingest ./test-files/sample1.txt ./test-files/sample2.txt
+pnpm glooai:ingest ./test-files/sample1.txt ./test-files/sample2.txt
 ```
 
 **Output Example:**
@@ -186,7 +186,7 @@ test-files/
 ```json
 {
   "scripts": {
-    "ingest": "tsx src/ingest-files.ts"
+    "glooai:ingest": "tsx src/ingestion.ts"
   }
 }
 ```
@@ -235,10 +235,10 @@ After implementation, verify:
 - [ ] `.env.local` contains correct credentials
 - [ ] `pnpm build` succeeds
 - [ ] `pnpm test` passes
-- [ ] `pnpm ingest test-files/sample1.txt` uploads successfully
+- [ ] `pnpm glooai:ingest test-files/sample1.txt` uploads successfully
 - [ ] Response shows file in `ingesting` array
 - [ ] Re-running same file shows it in `duplicates` array
-- [ ] Multiple files upload works: `pnpm ingest test-files/*.txt`
+- [ ] Multiple files upload works: `pnpm glooai:ingest test-files/*.txt`
 
 ---
 

@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "glooai:chat": "tsx src/index.ts",
-    "ingest": "tsx src/ingestion.ts"
+    "glooai:ingest": "tsx src/ingestion.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
