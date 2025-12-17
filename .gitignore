@@ -6,3 +6,4 @@ dist
 coverage
 pnpm-debug.log
 .DS_Store
+test-files/
