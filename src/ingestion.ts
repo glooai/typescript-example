@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 
 const TOKEN_URL = "https://platform.ai.gloo.com/oauth2/token";
-const INGESTION_URL = "https://api.gloo.ai/ingestion/v2/files";
+const INGESTION_URL = "https://platform.ai.gloo.com/ingestion/v2/files";
 
 export type IngestionCredentials = {
   clientId: string;

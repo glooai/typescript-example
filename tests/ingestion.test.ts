@@ -139,7 +139,7 @@ it("uploads files via multipart form data", async () => {
   expect(result.success).toBe(true);
   expect(result.ingesting).toEqual(["file1.txt", "file2.txt"]);
   expect(result.duplicates).toEqual([]);
-  expect(calls.url).toBe("https://api.gloo.ai/ingestion/v2/files");
+  expect(calls.url).toBe("https://platform.ai.gloo.com/ingestion/v2/files");
   expect(calls.init?.method).toBe("POST");
   expect(calls.init?.headers).toMatchObject({
     Authorization: "Bearer token-abc",
