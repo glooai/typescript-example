@@ -1,6 +1,11 @@
 import { expect, it, vi, beforeEach, afterEach } from "vitest";
 import * as itemsModule from "../src/items.js";
 
+vi.mock("node:fs/promises", () => ({
+  mkdir: vi.fn().mockResolvedValue(undefined),
+  writeFile: vi.fn().mockResolvedValue(undefined),
+}));
+
 type FetchCall = {
   url?: string | URL | Request;
   init?: RequestInit;
