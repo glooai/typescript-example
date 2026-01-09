@@ -2,6 +2,7 @@ import { expect, it, vi, beforeEach, afterEach, describe } from "vitest";
 import { EventEmitter } from "node:events";
 import * as itemsMetadataModule from "../src/items-metadata.js";
 import type { ItemMetadata } from "../src/items-metadata.js";
+import type { TokenResponse } from "../src/auth.js";
 
 // Mock stream class
 class MockWriteStream extends EventEmitter {
@@ -303,17 +304,17 @@ describe("streamMetadataToFile", () => {
     expect(count).toBe(2);
 
     // First item starts with "  " (no comma)
-    const writeCalls = mockStream.write.mock.calls;
+    const writeCalls = mockStream.write.mock.calls as unknown as [unknown][];
     const firstItemCall = writeCalls.find(
       (call) => typeof call[0] === "string" && call[0].includes('"item-1"')
     );
-    expect(firstItemCall?.[0]).toMatch(/^  /);
+    expect(firstItemCall?.[0]).toMatch(/^ {2}/);
 
     // Second item starts with ",\n  " (with comma)
     const secondItemCall = writeCalls.find(
       (call) => typeof call[0] === "string" && call[0].includes('"item-2"')
     );
-    expect(secondItemCall?.[0]).toMatch(/^,\n  /);
+    expect(secondItemCall?.[0]).toMatch(/^,\n {2}/);
   });
 
   it("returns count of written items", async () => {
@@ -366,7 +367,7 @@ describe("runItemsMetadataExample", () => {
 
   it("throws when access token is missing", async () => {
     const { getAccessToken } = await import("../src/auth.js");
-    vi.mocked(getAccessToken).mockResolvedValue({});
+    vi.mocked(getAccessToken).mockResolvedValue({} as TokenResponse);
 
     await expect(itemsMetadataModule.runItemsMetadataExample()).rejects.toThrow(
       "Access token missing from token response."
