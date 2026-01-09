@@ -1,6 +1,6 @@
 import { config as loadEnv } from "dotenv";
 import { fileURLToPath } from "node:url";
-import { loadCredentials, getAccessToken } from "./index.js";
+import { loadCredentials, getAccessToken } from "./auth.js";
 
 const SEARCH_URL = "https://platform.ai.gloo.com/ai/data/v1/search";
 const COLLECTION = "GlooProd";
