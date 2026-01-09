@@ -1,11 +1,6 @@
 import { config as loadEnv } from "dotenv";
-import {
-  decode as decodeJwt,
-  JwtPayload,
-  Secret,
-  verify as verifyJwt,
-} from "jsonwebtoken";
-import type { VerifyOptions } from "jsonwebtoken";
+import jwt from "jsonwebtoken";
+import type { JwtPayload, Secret, VerifyOptions } from "jsonwebtoken";
 import { fileURLToPath } from "node:url";
 import {
   loadCredentials,
@@ -52,12 +47,12 @@ export function describeExpiration(
 ): number | null {
   try {
     const payload = verificationKey
-      ? (verifyJwt(
+      ? (jwt.verify(
           accessToken,
           verificationKey,
           verificationOptions
         ) as JwtPayload)
-      : (decodeJwt(accessToken) as JwtPayload | null);
+      : (jwt.decode(accessToken) as JwtPayload | null);
 
     if (!payload || typeof payload.exp !== "number") {
       return null;
