@@ -30,8 +30,8 @@ afterEach(() => {
 });
 
 it("loads credentials from the environment", () => {
-  process.env.GLOO_AI_CLIENT_ID = "abc";
-  process.env.GLOO_AI_CLIENT_SECRET = "xyz";
+  process.env.GLOO_CLIENT_ID = "abc";
+  process.env.GLOO_CLIENT_SECRET = "xyz";
 
   const creds = gloo.loadCredentials();
 
@@ -39,11 +39,11 @@ it("loads credentials from the environment", () => {
 });
 
 it("throws when credentials are missing", () => {
-  delete process.env.GLOO_AI_CLIENT_ID;
-  delete process.env.GLOO_AI_CLIENT_SECRET;
+  delete process.env.GLOO_CLIENT_ID;
+  delete process.env.GLOO_CLIENT_SECRET;
 
   expect(() => gloo.loadCredentials()).toThrow(
-    /Missing GLOO_AI_CLIENT_ID environment variable/
+    /Missing GLOO_CLIENT_ID environment variable/
   );
 });
 
@@ -220,8 +220,8 @@ it("raises on failed token responses", async () => {
 });
 
 it("fails the example when an access token is missing", async () => {
-  process.env.GLOO_AI_CLIENT_ID = "id";
-  process.env.GLOO_AI_CLIENT_SECRET = "secret";
+  process.env.GLOO_CLIENT_ID = "id";
+  process.env.GLOO_CLIENT_SECRET = "secret";
   vi.spyOn(globalThis, "fetch").mockImplementationOnce(() =>
     mockFetch({ not_access_token: true })
   );
@@ -232,8 +232,8 @@ it("fails the example when an access token is missing", async () => {
 });
 
 it("runs the example flow with mocked network calls", async () => {
-  process.env.GLOO_AI_CLIENT_ID = "id";
-  process.env.GLOO_AI_CLIENT_SECRET = "secret";
+  process.env.GLOO_CLIENT_ID = "id";
+  process.env.GLOO_CLIENT_SECRET = "secret";
   const token = `${base64Url(
     JSON.stringify({ alg: "none", typ: "JWT" })
   )}.${base64Url(JSON.stringify({ exp: 42 }))}.signature`;
