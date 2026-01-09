@@ -7,4 +7,5 @@ coverage
 pnpm-debug.log
 .DS_Store
 test-files/
+output
 pr.md

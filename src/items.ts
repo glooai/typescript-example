@@ -1,4 +1,6 @@
 import { config as loadEnv } from "dotenv";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadCredentials, getAccessToken } from "./auth.js";
 
@@ -48,6 +50,18 @@ export async function getItems(
   return (await response.json()) as ItemsResponse;
 }
 
+async function saveItemsToFile(items: ItemsResponse): Promise<string> {
+  const outputDir = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "output"
+  );
+  await mkdir(outputDir, { recursive: true });
+  const outputPath = join(outputDir, "items.json");
+  await writeFile(outputPath, JSON.stringify(items, null, 2));
+  return outputPath;
+}
+
 export async function runItemsExample(): Promise<void> {
   const credentials = loadCredentials();
   const publisherId = loadPublisherId();
@@ -64,6 +78,9 @@ export async function runItemsExample(): Promise<void> {
 
   console.log(`Found ${items.length} item(s)`);
   console.log(JSON.stringify(items, null, 2));
+
+  const outputPath = await saveItemsToFile(items);
+  console.log(`\nSaved items to ${outputPath}`);
 }
 
 const isEntryPoint = process.argv[1] === fileURLToPath(import.meta.url);
