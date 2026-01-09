@@ -5,7 +5,7 @@ This example loads Gloo AI client credentials from `.env.local`, requests a clie
 ## Setup
 
 1. Use Node.js LTS with pnpm (`corepack enable pnpm` if needed). An `.nvmrc` pin of `lts/*` is provided.
-2. Get your client ID and secret from https://studio.ai.gloo.com/build/keys, then copy `.env.example` to `.env.local` (kept out of git) and fill in `GLOO_AI_CLIENT_ID` and `GLOO_AI_CLIENT_SECRET`.
+2. Get your client ID and secret from https://studio.ai.gloo.com/build/keys, then copy `.env.example` to `.env.local` (kept out of git) and fill in `GLOO_CLIENT_ID` and `GLOO_CLIENT_SECRET`.
 3. Install dependencies:
    ```bash
    pnpm install
@@ -27,8 +27,8 @@ await runExample("What is the meaning of community?");
 
 // Or call the pieces yourself
 const { access_token } = await getAccessToken({
-  clientId: process.env.GLOO_AI_CLIENT_ID!,
-  clientSecret: process.env.GLOO_AI_CLIENT_SECRET!,
+  clientId: process.env.GLOO_CLIENT_ID!,
+  clientSecret: process.env.GLOO_CLIENT_SECRET!,
 });
 const completion = await getChatCompletion(access_token, "Hi there!");
 console.log(completion);
