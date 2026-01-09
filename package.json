@@ -15,6 +15,7 @@
     "glooai:chat": "tsx src/index.ts",
     "glooai:ingest": "tsx src/ingestion.ts",
     "glooai:items": "tsx src/items.ts",
+    "glooai:items:metadata": "tsx src/items-metadata.ts",
     "glooai:search": "tsx src/search.ts"
   },
   "dependencies": {
