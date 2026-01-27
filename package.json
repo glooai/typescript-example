@@ -16,7 +16,8 @@
     "glooai:ingest": "tsx src/ingestion.ts",
     "glooai:items": "tsx src/items.ts",
     "glooai:items:metadata": "tsx src/items-metadata.ts",
-    "glooai:search": "tsx src/search.ts"
+    "glooai:search": "tsx src/search.ts",
+    "glooai:jwt": "tsx src/jwt-check.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
