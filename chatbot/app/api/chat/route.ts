@@ -1,4 +1,4 @@
-import { streamText, convertToModelMessages } from "ai";
+import { streamText, convertToModelMessages, type JSONValue } from "ai";
 import { gloo } from "@/lib/gloo-provider";
 
 export const maxDuration = 60;
@@ -10,7 +10,7 @@ export async function POST(req: Request) {
   const modelMessages = await convertToModelMessages(messages);
 
   // Build Gloo-specific body params based on routing mode
-  const glooParams: Record<string, unknown> = {};
+  const glooParams: Record<string, JSONValue> = {};
 
   switch (routingMode) {
     case "ai_core_select":
@@ -32,15 +32,17 @@ export async function POST(req: Request) {
     glooParams.tradition = tradition;
   }
 
-  // For AI Select, use the specific model; otherwise use a placeholder
-  // that the provider sends as `model` in the body (Gloo ignores it
-  // when auto_routing is true or model_family is set).
+  // For AI Select, use the caller's exact model; otherwise use a placeholder
+  // (the provider's fetch wrapper strips `model` when auto_routing or
+  // model_family is active, so the placeholder never reaches the API).
   const modelId = routingMode === "ai_select" && model ? model : "gloo-auto";
 
   const result = streamText({
     model: gloo.chatModel(modelId),
     messages: modelMessages,
-    ...glooParams,
+    providerOptions: {
+      gloo: glooParams,
+    },
   });
 
   return result.toUIMessageStreamResponse();

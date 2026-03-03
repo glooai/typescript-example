@@ -9,6 +9,23 @@ export const gloo = createOpenAICompatible({
     const token = await getValidToken();
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${token}`);
-    return fetch(url, { ...init, headers });
+
+    // Gloo V2 requires exactly one routing mechanism (auto_routing, model,
+    // or model_family). The AI SDK always sends `model`, so strip it when
+    // a different routing mechanism is active.
+    let body = init?.body;
+    if (typeof body === "string") {
+      try {
+        const parsed = JSON.parse(body);
+        if (parsed.auto_routing || parsed.model_family) {
+          delete parsed.model;
+          body = JSON.stringify(parsed);
+        }
+      } catch {
+        // leave body unchanged if it's not JSON
+      }
+    }
+
+    return fetch(url, { ...init, headers, body });
   },
 });
