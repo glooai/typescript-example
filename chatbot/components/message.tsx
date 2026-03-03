@@ -1,10 +1,8 @@
 "use client";
 
 import type { UIMessage } from "ai";
-import { Streamdown } from "streamdown";
-import { code } from "@streamdown/code";
-
-const plugins = { code };
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 export function Message({
   message,
@@ -34,13 +32,17 @@ export function Message({
               );
             }
             return (
-              <Streamdown
+              <div
                 key={`${message.id}-${i}`}
-                plugins={plugins}
-                isAnimating={isStreaming}
+                className="prose prose-sm max-w-none"
               >
-                {part.text}
-              </Streamdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {part.text}
+                </ReactMarkdown>
+                {isStreaming && (
+                  <span className="inline-block w-2 h-4 ml-0.5 bg-gray-400 animate-pulse align-text-bottom" />
+                )}
+              </div>
             );
           }
           return null;
