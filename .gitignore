@@ -9,3 +9,4 @@ pnpm-debug.log
 test-files/
 output
 pr.md
+.claude/worktrees
