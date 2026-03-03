@@ -1,7 +1,9 @@
 name: CI
 
 on:
-  push:
+  pull_request:
+    branches:
+      - main
 
 env:
   GLOO_AI_CLIENT_ID: test-gloo-ai-client-id
