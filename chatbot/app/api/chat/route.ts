@@ -1,4 +1,4 @@
-import { streamText } from "ai";
+import { streamText, convertToModelMessages } from "ai";
 import { gloo } from "@/lib/gloo-provider";
 
 export const maxDuration = 60;
@@ -6,6 +6,8 @@ export const maxDuration = 60;
 export async function POST(req: Request) {
   const { messages, routingMode, modelFamily, tradition, model } =
     await req.json();
+
+  const modelMessages = await convertToModelMessages(messages);
 
   // Build Gloo-specific body params based on routing mode
   const glooParams: Record<string, unknown> = {};
@@ -37,7 +39,7 @@ export async function POST(req: Request) {
 
   const result = streamText({
     model: gloo.chatModel(modelId),
-    messages,
+    messages: modelMessages,
     ...glooParams,
   });
 
