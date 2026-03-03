@@ -1,8 +1,6 @@
-<p align="center">
-  <a href="https://gloo.com/ai">
-    <img src="assets/gloo-ai-logo.svg" alt="Gloo AI" width="240" />
-  </a>
-</p>
+<a href="https://docs.gloo.com/?utm_source=github&utm_campaign=glooai-typescript-example">
+  <img src="assets/gloo-ai-logo.svg" alt="Gloo AI" width="240" />
+</a>
 
 # Gloo AI TypeScript Examples
 
