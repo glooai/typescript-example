@@ -15,6 +15,6 @@ module.exports = {
     "plugin:@typescript-eslint/recommended",
     "prettier",
   ],
-  ignorePatterns: ["dist", "node_modules", "chatbot"],
+  ignorePatterns: ["dist", "node_modules"],
   rules: {},
 };

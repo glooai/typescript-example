@@ -7,7 +7,6 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
-      exclude: ["chatbot/**"],
       thresholds: {
         lines: 70,
         functions: 70,
