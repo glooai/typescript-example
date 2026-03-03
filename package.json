@@ -10,7 +10,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && pnpm --filter gloo-chatbot build",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "glooai:chat": "tsx src/index.ts",
