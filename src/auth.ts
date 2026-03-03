@@ -54,8 +54,10 @@ export async function fetchJson<TResponse>(
 
 export function loadCredentials(): Credentials {
   return {
-    clientId: requireEnv("GLOO_CLIENT_ID"),
-    clientSecret: requireEnv("GLOO_CLIENT_SECRET"),
+    clientId:
+      process.env.GLOO_AI_CLIENT_ID ?? requireEnv("GLOO_CLIENT_ID"),
+    clientSecret:
+      process.env.GLOO_AI_CLIENT_SECRET ?? requireEnv("GLOO_CLIENT_SECRET"),
   };
 }
 

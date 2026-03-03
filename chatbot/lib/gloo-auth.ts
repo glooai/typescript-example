@@ -9,11 +9,12 @@ let cachedToken: { accessToken: string; expiresAt: number } | null = null;
 let pendingTokenRequest: Promise<string> | null = null;
 
 function getCredentials() {
-  const clientId = process.env.GLOO_CLIENT_ID;
-  const clientSecret = process.env.GLOO_CLIENT_SECRET;
+  const clientId = process.env.GLOO_AI_CLIENT_ID ?? process.env.GLOO_CLIENT_ID;
+  const clientSecret =
+    process.env.GLOO_AI_CLIENT_SECRET ?? process.env.GLOO_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
     throw new Error(
-      "Missing GLOO_CLIENT_ID or GLOO_CLIENT_SECRET environment variables"
+      "Missing GLOO_AI_CLIENT_ID or GLOO_AI_CLIENT_SECRET environment variables"
     );
   }
   return { clientId, clientSecret };
