@@ -1,0 +1,4 @@
+# BEGIN: servant-update-docs (auto-managed)
+.context/
+demos/next/app/_components/*-data.ts
+# END: servant-update-docs (auto-managed)
