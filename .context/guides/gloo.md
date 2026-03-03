@@ -25,6 +25,19 @@ Supports streaming, tool/function calling, and tradition-aware responses (`evang
 
 Includes V1→V2 migration guide (endpoint change, routing param required, new metadata fields).
 
+### `api/supported-models.md` — Supported Models
+
+Full list of model IDs for the Completions V2 `model` parameter, grouped by provider:
+
+| Provider    | Example Model ID                   |
+| ----------- | ---------------------------------- |
+| Anthropic   | `gloo-anthropic-claude-sonnet-4.5` |
+| Google      | `gloo-google-gemini-2.5-pro`       |
+| OpenAI      | `gloo-openai-gpt-5.2`              |
+| Open Source | `gloo-deepseek-v3.2`               |
+
+Use the [Model Explorer](https://studio.ai.gloo.com/models) to compare pricing, context windows, and capabilities.
+
 ## Tutorials
 
 ### `tutorials/authentication.md` — OAuth2 Authentication

@@ -26,6 +26,8 @@ afterEach(() => {
 });
 
 it("loads ingestion credentials from the environment", () => {
+  delete process.env.GLOO_AI_CLIENT_ID;
+  delete process.env.GLOO_AI_CLIENT_SECRET;
   process.env.GLOO_CLIENT_ID = "ingestion-client";
   process.env.GLOO_CLIENT_SECRET = "ingestion-secret";
 
@@ -38,6 +40,8 @@ it("loads ingestion credentials from the environment", () => {
 });
 
 it("throws when ingestion credentials are missing", () => {
+  delete process.env.GLOO_AI_CLIENT_ID;
+  delete process.env.GLOO_AI_CLIENT_SECRET;
   delete process.env.GLOO_CLIENT_ID;
   delete process.env.GLOO_CLIENT_SECRET;
 

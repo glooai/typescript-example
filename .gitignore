@@ -1,8 +1,10 @@
 .env*
 !.env.example
+!.env.local.example
 
 node_modules
 dist
+chatbot/.next
 coverage
 pnpm-debug.log
 .DS_Store
@@ -10,3 +12,4 @@ test-files/
 output
 pr.md
 .claude/worktrees
+.turbo
