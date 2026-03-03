@@ -1,4 +1,4 @@
-<a href="https://docs.gloo.com/?utm_source=github&utm_campaign=glooai-typescript-example" target="_blank">
+<a href="https://docs.gloo.com/?utm_source=github&utm_campaign=glooai-typescript-example">
   <img src="assets/gloo-ai-logo.svg" alt="Gloo AI" width="240" />
 </a>
 
