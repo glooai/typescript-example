@@ -30,6 +30,8 @@ afterEach(() => {
 });
 
 it("loads credentials from the environment", () => {
+  delete process.env.GLOO_AI_CLIENT_ID;
+  delete process.env.GLOO_AI_CLIENT_SECRET;
   process.env.GLOO_CLIENT_ID = "abc";
   process.env.GLOO_CLIENT_SECRET = "xyz";
 
@@ -39,6 +41,8 @@ it("loads credentials from the environment", () => {
 });
 
 it("throws when credentials are missing", () => {
+  delete process.env.GLOO_AI_CLIENT_ID;
+  delete process.env.GLOO_AI_CLIENT_SECRET;
   delete process.env.GLOO_CLIENT_ID;
   delete process.env.GLOO_CLIENT_SECRET;
 

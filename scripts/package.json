@@ -1,0 +1,36 @@
+{
+  "name": "@glooai/scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "glooai:chat": "tsx src/index.ts",
+    "glooai:ingest": "tsx src/ingestion.ts",
+    "glooai:items": "tsx src/items.ts",
+    "glooai:items:metadata": "tsx src/items-metadata.ts",
+    "glooai:search": "tsx src/search.ts",
+    "glooai:jwt": "tsx src/jwt-check.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^22.9.3",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "@vitest/coverage-v8": "^2.1.3",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^9.1.0",
+    "tsx": "^4.19.1",
+    "typescript": "~5.5.4",
+    "vitest": "^2.1.3"
+  }
+}

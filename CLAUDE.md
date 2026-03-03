@@ -8,7 +8,7 @@ TypeScript example project for the Gloo AI platform API. Uses pnpm, tsx, vitest.
 
 ## Conventions
 
-- Source in `src/`, tests in `tests/`
+- API audit scripts in `scripts/src/`, tests in `scripts/tests/`
 - Auth via OAuth2 client credentials (see context docs below)
 - API target: Gloo Completions V2 (`/ai/v2/chat/completions`)
 

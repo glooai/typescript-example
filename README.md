@@ -1,47 +1,92 @@
-# Gloo AI TypeScript Quickstart (pnpm)
+<a href="https://docs.gloo.com/?utm_source=github&utm_campaign=glooai-typescript-example">
+  <img src="assets/gloo-ai-logo.svg" alt="Gloo AI" width="240" />
+</a>
 
-This example loads Gloo AI client credentials from `.env.local`, requests a client-credential OAuth token scoped to `api/access`, decodes the JWT `exp` to show when the token expires, and posts a chat completion with model `meta.llama3-70b-instruct-v1:0` using the system message `You are a human-flourishing assistant.`. The default run asks “How do I discover my purpose?”, logs the token expiry (Unix seconds), and prints the completion JSON.
+# Gloo AI TypeScript Examples
+
+TypeScript examples for the [Gloo AI](https://www.ai.gloo.com/) platform API — a monorepo with two workspace packages:
+
+| Package                | Description                                                        |
+| ---------------------- | ------------------------------------------------------------------ |
+| [`chatbot/`](chatbot/) | Next.js streaming chatbot using the Completions V2 API             |
+| [`scripts/`](scripts/) | CLI scripts for auth, chat, ingestion, search, and item management |
+
+## Prerequisites
+
+- **Node.js LTS** (`.nvmrc` provided — run `nvm use` or `fnm use`)
+- **pnpm** (`corepack enable pnpm` if needed)
+- **Gloo AI credentials** — get a client ID and secret at https://studio.ai.gloo.com/build/keys
 
 ## Setup
 
-1. Use Node.js LTS with pnpm (`corepack enable pnpm` if needed). An `.nvmrc` pin of `lts/*` is provided.
-2. Get your client ID and secret from https://studio.ai.gloo.com/build/keys, then copy `.env.example` to `.env.local` (kept out of git) and fill in `GLOO_CLIENT_ID` and `GLOO_CLIENT_SECRET`.
-3. Install dependencies:
-   ```bash
-   pnpm install
-   ```
+```bash
+# 1. Install dependencies
+pnpm install
 
-## Run the chat example
+# 2. Configure credentials for the CLI scripts
+cp scripts/.env.example scripts/.env.local
+# Edit scripts/.env.local with your GLOO_AI_CLIENT_ID and GLOO_AI_CLIENT_SECRET
+
+# 3. Configure credentials for the chatbot
+cp chatbot/.env.local.example chatbot/.env.local
+# Edit chatbot/.env.local with your GLOO_AI_CLIENT_ID and GLOO_AI_CLIENT_SECRET
+```
+
+## Chatbot
+
+A Next.js app demonstrating streaming markdown rendering with the Gloo Completions V2 API. Uses Vercel AI SDK v6 with a custom OpenAI-compatible provider, react-markdown for streaming token rendering, and Tailwind CSS v4.
+
+Supports all three Gloo routing modes (AI Core, AI Core Select, AI Select) plus tradition-aware responses.
 
 ```bash
-pnpm glooai:chat
+# Development server at http://localhost:3000
+pnpm dev
+
+# Production build
+pnpm --filter gloo-chatbot build
 ```
 
-This invokes `src/index.ts`, fetches an access token from `https://platform.ai.gloo.com/oauth2/token` with the `api/access` scope, and calls `https://platform.ai.gloo.com/ai/v1/chat/completions` using `meta.llama3-70b-instruct-v1:0`. The CLI path loads `.env.local` for you, while library consumers should provide credentials via `process.env`. To reuse the helpers or supply a custom prompt programmatically:
+### Deploy to Vercel
 
-```ts
-import { getAccessToken, getChatCompletion, runExample } from "./src/index";
+Set **Root Directory** to `chatbot` and add the environment variables `GLOO_CLIENT_ID` and `GLOO_CLIENT_SECRET`.
 
-// Full flow with your own prompt
-await runExample("What is the meaning of community?");
+## CLI Scripts
 
-// Or call the pieces yourself
-const { access_token } = await getAccessToken({
-  clientId: process.env.GLOO_CLIENT_ID!,
-  clientSecret: process.env.GLOO_CLIENT_SECRET!,
-});
-const completion = await getChatCompletion(access_token, "Hi there!");
-console.log(completion);
+Standalone scripts for exploring the Gloo AI platform APIs.
+
+```bash
+pnpm glooai:chat            # Chat completion (Completions V1)
+pnpm glooai:ingest          # Content ingestion
+pnpm glooai:items           # List items
+pnpm glooai:items:metadata  # Item metadata
+pnpm glooai:search          # Semantic search
+pnpm glooai:jwt             # Decode and inspect access token
 ```
 
-## Scripts
+## Development
 
-- `pnpm format` / `pnpm format:check` – Prettier write/check
-- `pnpm lint` – ESLint with zero tolerated warnings
-- `pnpm typecheck` – TypeScript `--noEmit`
-- `pnpm build` – Compile TypeScript to `dist/`
-- `pnpm test` – Run unit tests (Vitest)
-- `pnpm test:coverage` – Vitest with coverage (70% minimum thresholds)
-- `pnpm glooai:chat` – Integration-style run of `src/index.ts`
+The repo uses [Turborepo](https://turbo.build/) for task orchestration. Root scripts delegate to workspaces:
 
-Generated artifacts like `dist/`, `node_modules/`, and `coverage/` are gitignored.
+```bash
+pnpm build           # Build all packages
+pnpm lint            # Lint all packages
+pnpm typecheck       # Type-check all packages
+pnpm test            # Run all tests
+pnpm test:coverage   # Vitest coverage (scripts only, 70% minimum)
+pnpm format          # Prettier — format all files
+pnpm format:check    # Prettier — check formatting
+```
+
+## Project Structure
+
+```
+├── chatbot/                 # Next.js streaming chatbot
+│   ├── app/                 # App Router pages + API route
+│   ├── components/          # Chat UI, message renderer, settings
+│   └── lib/                 # Gloo auth + provider wrappers
+├── scripts/                 # CLI scripts + tests
+│   ├── src/                 # Auth, chat, ingestion, search, items
+│   └── tests/               # Vitest unit tests
+├── turbo.json               # Turborepo task config
+└── pnpm-workspace.yaml      # Workspace packages
+```

@@ -1,0 +1,35 @@
+{
+  "name": "gloo-chatbot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "rm -rf .next && next build",
+    "clean": "rm -rf .next",
+    "start": "next start",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.33",
+    "@ai-sdk/react": "^3.0.110",
+    "@tailwindcss/typography": "^0.5.19",
+    "ai": "^6.0.108",
+    "next": "^15.5.12",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.1",
+    "@types/node": "^22.9.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.3",
+    "eslint-config-next": "^16.1.6",
+    "tailwindcss": "^4.2.1",
+    "typescript": "~5.5.4"
+  }
+}
