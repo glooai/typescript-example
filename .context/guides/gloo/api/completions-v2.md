@@ -1,4 +1,5 @@
 > ## Documentation Index
+>
 > Fetch the complete documentation index at: https://docs.gloo.com/llms.txt
 > Use this file to discover all available pages before exploring further.
 
@@ -10,9 +11,9 @@ The Gloo Completions V2 API is built on a layered, production-ready AI architect
 
 ## **System Capabilities**
 
-* Curated Foundational Models: Access the best foundational models available without decision fatigue or unsafe defaults.
-* Safe & Values-Aligned: Values alignment and AI safety is evaluted at every layer of the input and output, considering six dimensions of AI safety (Physical, Ethical, Emotional, Factual, Theological, and Security)
-* Intelligent Routing: Optional automatic model routing optimizes your outputs for quality, cost, and intent.
+- Curated Foundational Models: Access the best foundational models available without decision fatigue or unsafe defaults.
+- Safe & Values-Aligned: Values alignment and AI safety is evaluted at every layer of the input and output, considering six dimensions of AI safety (Physical, Ethical, Emotional, Factual, Theological, and Security)
+- Intelligent Routing: Optional automatic model routing optimizes your outputs for quality, cost, and intent.
 
 ## **Why Completions V2?**
 
@@ -112,12 +113,12 @@ Get real-time responses for better UX:
 
 Function calling works seamlessly with all routing modes. You can define tools in your request and the selected model will invoke them as needed:
 
-```json  theme={null}
+```json theme={null}
 {
   "messages": [
     { "role": "user", "content": "What's the weather in Shanghai?" }
   ],
-  "auto_routing": true,  // or use model/model_family
+  "auto_routing": true, // or use model/model_family
   "tools": [
     {
       "type": "function",
@@ -141,10 +142,10 @@ Function calling works seamlessly with all routing modes. You can define tools i
 
 For comprehensive tool calling documentation including:
 
-* Multiple SDK examples (Python, TypeScript, AgentKit)
-* Model compatibility and streaming support
-* Multi-step tool workflows
-* Best practices and patterns
+- Multiple SDK examples (Python, TypeScript, AgentKit)
+- Model compatibility and streaming support
+- Multi-step tool workflows
+- Best practices and patterns
 
 See our **[Tool Use Guide](/api-guides/tool-use)**.
 
@@ -152,9 +153,9 @@ See our **[Tool Use Guide](/api-guides/tool-use)**.
 
 Before starting, ensure you have:
 
-* A Gloo AI Studio account
-* Your Client ID and Client Secret from the [API Credentials page](/studio/manage-api-credentials)
-* **Authentication setup** - Complete the [Authentication Tutorial](/tutorials/authentication) first
+- A Gloo AI Studio account
+- Your Client ID and Client Secret from the [API Credentials page](/studio/manage-api-credentials)
+- **Authentication setup** - Complete the [Authentication Tutorial](/tutorials/authentication) first
 
 **URL:** `https://platform.ai.gloo.com/ai/v2/chat/completions`
 
@@ -162,7 +163,7 @@ Before starting, ensure you have:
 
 #### Example CURL Request:
 
-```bash  theme={null}
+```bash theme={null}
 curl -X 'POST' \
   'https://platform.ai.gloo.com/ai/v2/chat/completions' \
   -H 'accept: application/json' \
@@ -225,7 +226,7 @@ The response includes routing metadata that varies based on your model selection
 
 #### Example: Auto-Routing Response
 
-```json  theme={null}
+```json theme={null}
 {
   "id": "gen-1768500882-56HaBYeuAb4pLpv8PXqh",
   "object": "chat.completion",
@@ -244,7 +245,7 @@ The response includes routing metadata that varies based on your model selection
 
 #### Example: Model Family Response
 
-```json  theme={null}
+```json theme={null}
 {
   "id": "gen-1768501093-eWeO7cEfSgTPxxUmEgCI",
   "object": "chat.completion",
@@ -263,7 +264,7 @@ The response includes routing metadata that varies based on your model selection
 
 #### Example: Direct Model Selection Response
 
-```json  theme={null}
+```json theme={null}
 {
   "id": "gen-1768498306-NYVIJq1ygiReBbX1AKwP",
   "object": "chat.completion",
@@ -303,12 +304,10 @@ The main difference is how you specify model selection:
 
 **If you're not specifying a model in V1**, the simplest migration path is to use V2's auto-routing, which intelligently selects the best model for each request:
 
-```json  theme={null}
+```json theme={null}
 {
   "auto_routing": true,
-  "messages": [
-    { "role": "user", "content": "Hello" }
-  ]
+  "messages": [{ "role": "user", "content": "Hello" }]
 }
 ```
 
@@ -316,24 +315,20 @@ The main difference is how you specify model selection:
 
 **V1 Request:**
 
-```json  theme={null}
+```json theme={null}
 {
   "model": "gloo-anthropic-claude-haiku-4.5",
-  "messages": [
-    { "role": "user", "content": "Hello" }
-  ]
+  "messages": [{ "role": "user", "content": "Hello" }]
 }
 ```
 
 **V2 Request (equivalent):**
 
-```json  theme={null}
+```json theme={null}
 {
   "model": "gloo-anthropic-claude-haiku-4.5",
   "auto_routing": false,
-  "messages": [
-    { "role": "user", "content": "Hello" }
-  ]
+  "messages": [{ "role": "user", "content": "Hello" }]
 }
 ```
 
@@ -351,7 +346,7 @@ V2 responses include additional routing metadata. The exact fields vary by routi
 
 Example (auto-routing with tradition):
 
-```json  theme={null}
+```json theme={null}
 {
   "model": "gloo-openai-gpt-5.2",
   "provider": "Gloo AI",
@@ -373,9 +368,9 @@ Example (auto-routing with tradition):
 
 1. Update the endpoint URL from `/ai/v1/` to `/ai/v2/`
 2. Add a routing mechanism to your request:
-   * Set `auto_routing: true` to use smart routing (recommended)
-   * Or keep using `model` with `auto_routing: false` for direct model selection
-   * Or use `model_family` to let Gloo select the best model from a provider
+   - Set `auto_routing: true` to use smart routing (recommended)
+   - Or keep using `model` with `auto_routing: false` for direct model selection
+   - Or use `model_family` to let Gloo select the best model from a provider
 3. Update model IDs to [V2-supported models](/api-guides/supported-models)
 4. (Optional) Add `tradition` parameter for theology-aware responses
 5. Update response handling to accommodate new metadata fields

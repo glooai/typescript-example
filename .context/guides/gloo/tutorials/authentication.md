@@ -1,4 +1,5 @@
 > ## Documentation Index
+>
 > Fetch the complete documentation index at: https://docs.gloo.com/llms.txt
 > Use this file to discover all available pages before exploring further.
 
@@ -21,8 +22,8 @@ The Gloo AI API uses OAuth2 client credentials flow for authentication. This pro
 
 Before starting, ensure you have:
 
-* A Gloo AI Studio account
-* Your Client ID and Client Secret from the [API Credentials page](/studio/manage-api-credentials)
+- A Gloo AI Studio account
+- Your Client ID and Client Secret from the [API Credentials page](/studio/manage-api-credentials)
 
 ## Step 1: Environment Setup
 
@@ -32,14 +33,14 @@ First, set up your environment variables to securely store your credentials:
 
 Create a `.env` file in your project root:
 
-```bash  theme={null}
+```bash theme={null}
 GLOO_CLIENT_ID=your_actual_client_id_here
 GLOO_CLIENT_SECRET=your_actual_client_secret_here
 ```
 
 For Go and Java, you can also export them directly:
 
-```bash  theme={null}
+```bash theme={null}
 export GLOO_CLIENT_ID="your_actual_client_id_here"
 export GLOO_CLIENT_SECRET="your_actual_client_secret_here"
 ```
@@ -55,16 +56,16 @@ Exchange your Client ID and Client Secret for an access token by calling the OAu
   import os
   from dotenv import load_dotenv
 
-  load_dotenv()
+load_dotenv()
 
-  CLIENT_ID = os.getenv("GLOO_CLIENT_ID", "YOUR_CLIENT_ID")
-  CLIENT_SECRET = os.getenv("GLOO_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
-  TOKEN_URL = "https://platform.ai.gloo.com/oauth2/token"
+CLIENT_ID = os.getenv("GLOO_CLIENT_ID", "YOUR_CLIENT_ID")
+CLIENT_SECRET = os.getenv("GLOO_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
+TOKEN_URL = "https://platform.ai.gloo.com/oauth2/token"
 
-  def get_access_token():
-      """Retrieve a new access token from the Gloo AI API."""
-      headers = {"Content-Type": "application/x-www-form-urlencoded"}
-      data = {"grant_type": "client_credentials", "scope": "api/access"}
+def get_access_token():
+"""Retrieve a new access token from the Gloo AI API."""
+headers = {"Content-Type": "application/x-www-form-urlencoded"}
+data = {"grant_type": "client_credentials", "scope": "api/access"}
 
       response = requests.post(TOKEN_URL, headers=headers, data=data, auth=(CLIENT_ID, CLIENT_SECRET))
       response.raise_for_status()
@@ -74,261 +75,265 @@ Exchange your Client ID and Client Secret for an access token by calling the OAu
 
       return token_data
 
-  # Example usage
-  token_info = get_access_token()
-  print(f"Access token: {token_info['access_token']}")
-  print(f"Expires in: {token_info['expires_in']} seconds")
-  ```
+# Example usage
 
-  ```javascript JavaScript theme={null}
-  const axios = require('axios');
-  require('dotenv').config();
+token_info = get_access_token()
+print(f"Access token: {token_info['access_token']}")
+print(f"Expires in: {token_info['expires_in']} seconds")
 
-  const CLIENT_ID = process.env.GLOO_CLIENT_ID || "YOUR_CLIENT_ID";
-  const CLIENT_SECRET = process.env.GLOO_CLIENT_SECRET || "YOUR_CLIENT_SECRET";
-  const TOKEN_URL = "https://platform.ai.gloo.com/oauth2/token";
+````
 
-  async function getAccessToken() {
-      const body = 'grant_type=client_credentials&scope=api/access';
-      const response = await axios.post(TOKEN_URL, body, {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          auth: { username: CLIENT_ID, password: CLIENT_SECRET }
-      });
+```javascript JavaScript theme={null}
+const axios = require('axios');
+require('dotenv').config();
 
-      const tokenData = response.data;
-      tokenData.expires_at = Math.floor(Date.now() / 1000) + tokenData.expires_in;
+const CLIENT_ID = process.env.GLOO_CLIENT_ID || "YOUR_CLIENT_ID";
+const CLIENT_SECRET = process.env.GLOO_CLIENT_SECRET || "YOUR_CLIENT_SECRET";
+const TOKEN_URL = "https://platform.ai.gloo.com/oauth2/token";
 
-      return tokenData;
-  }
+async function getAccessToken() {
+    const body = 'grant_type=client_credentials&scope=api/access';
+    const response = await axios.post(TOKEN_URL, body, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        auth: { username: CLIENT_ID, password: CLIENT_SECRET }
+    });
 
-  // Example usage
-  getAccessToken().then(tokenInfo => {
-      console.log(`Access token: ${tokenInfo.access_token}`);
-      console.log(`Expires in: ${tokenInfo.expires_in} seconds`);
+    const tokenData = response.data;
+    tokenData.expires_at = Math.floor(Date.now() / 1000) + tokenData.expires_in;
+
+    return tokenData;
+}
+
+// Example usage
+getAccessToken().then(tokenInfo => {
+    console.log(`Access token: ${tokenInfo.access_token}`);
+    console.log(`Expires in: ${tokenInfo.expires_in} seconds`);
+});
+````
+
+```typescript TypeScript theme={null}
+import axios from "axios";
+import * as dotenv from "dotenv";
+
+dotenv.config();
+
+const CLIENT_ID = process.env.GLOO_CLIENT_ID || "YOUR_CLIENT_ID";
+const CLIENT_SECRET = process.env.GLOO_CLIENT_SECRET || "YOUR_CLIENT_SECRET";
+const TOKEN_URL = "https://platform.ai.gloo.com/oauth2/token";
+
+interface TokenInfo {
+  access_token: string;
+  expires_in: number;
+  expires_at: number;
+  token_type: string;
+}
+
+async function getAccessToken(): Promise<TokenInfo> {
+  const body = "grant_type=client_credentials&scope=api/access";
+  const response = await axios.post<TokenInfo>(TOKEN_URL, body, {
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    auth: { username: CLIENT_ID, password: CLIENT_SECRET },
   });
-  ```
 
-  ```typescript TypeScript theme={null}
-  import axios from 'axios';
-  import * as dotenv from 'dotenv';
+  const tokenData = response.data;
+  (tokenData as any).expires_at =
+    Math.floor(Date.now() / 1000) + tokenData.expires_in;
 
-  dotenv.config();
+  return tokenData;
+}
 
-  const CLIENT_ID = process.env.GLOO_CLIENT_ID || "YOUR_CLIENT_ID";
-  const CLIENT_SECRET = process.env.GLOO_CLIENT_SECRET || "YOUR_CLIENT_SECRET";
-  const TOKEN_URL = "https://platform.ai.gloo.com/oauth2/token";
+// Example usage
+getAccessToken().then((tokenInfo) => {
+  console.log(`Access token: ${tokenInfo.access_token}`);
+  console.log(`Expires in: ${tokenInfo.expires_in} seconds`);
+});
+```
 
-  interface TokenInfo {
-      access_token: string;
-      expires_in: number;
-      expires_at: number;
-      token_type: string;
-  }
+```php PHP theme={null}
+<?php
+require_once 'vendor/autoload.php';
 
-  async function getAccessToken(): Promise<TokenInfo> {
-      const body = 'grant_type=client_credentials&scope=api/access';
-      const response = await axios.post<TokenInfo>(TOKEN_URL, body, {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          auth: { username: CLIENT_ID, password: CLIENT_SECRET }
-      });
+$dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
+$dotenv->load();
 
-      const tokenData = response.data;
-      (tokenData as any).expires_at = Math.floor(Date.now() / 1000) + tokenData.expires_in;
+$CLIENT_ID = getenv('GLOO_CLIENT_ID') ?: 'YOUR_CLIENT_ID';
+$CLIENT_SECRET = getenv('GLOO_CLIENT_SECRET') ?: 'YOUR_CLIENT_SECRET';
+$TOKEN_URL = 'https://platform.ai.gloo.com/oauth2/token';
 
-      return tokenData;
-  }
+function getAccessToken($client_id, $client_secret, $token_url) {
+    $post_data = 'grant_type=client_credentials&scope=api/access';
+    $ch = curl_init();
 
-  // Example usage
-  getAccessToken().then(tokenInfo => {
-      console.log(`Access token: ${tokenInfo.access_token}`);
-      console.log(`Expires in: ${tokenInfo.expires_in} seconds`);
-  });
-  ```
+    curl_setopt($ch, CURLOPT_URL, $token_url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_POST, 1);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
+    curl_setopt($ch, CURLOPT_USERPWD, $client_id . ':' . $client_secret);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/x-www-form-urlencoded']);
 
-  ```php PHP theme={null}
-  <?php
-  require_once 'vendor/autoload.php';
+    $result = curl_exec($ch);
+    if (curl_errno($ch)) {
+        throw new Exception(curl_error($ch));
+    }
+    curl_close($ch);
 
-  $dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
-  $dotenv->load();
+    $token_data = json_decode($result, true);
+    $token_data['expires_at'] = time() + $token_data['expires_in'];
 
-  $CLIENT_ID = getenv('GLOO_CLIENT_ID') ?: 'YOUR_CLIENT_ID';
-  $CLIENT_SECRET = getenv('GLOO_CLIENT_SECRET') ?: 'YOUR_CLIENT_SECRET';
-  $TOKEN_URL = 'https://platform.ai.gloo.com/oauth2/token';
+    return $token_data;
+}
 
-  function getAccessToken($client_id, $client_secret, $token_url) {
-      $post_data = 'grant_type=client_credentials&scope=api/access';
-      $ch = curl_init();
+// Example usage
+$token_info = getAccessToken($CLIENT_ID, $CLIENT_SECRET, $TOKEN_URL);
+echo "Access token: " . $token_info['access_token'] . "\n";
+echo "Expires in: " . $token_info['expires_in'] . " seconds\n";
+?>
+```
 
-      curl_setopt($ch, CURLOPT_URL, $token_url);
-      curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-      curl_setopt($ch, CURLOPT_POST, 1);
-      curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
-      curl_setopt($ch, CURLOPT_USERPWD, $client_id . ':' . $client_secret);
-      curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/x-www-form-urlencoded']);
+```go Go theme={null}
+package main
 
-      $result = curl_exec($ch);
-      if (curl_errno($ch)) {
-          throw new Exception(curl_error($ch));
-      }
-      curl_close($ch);
+import (
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+)
 
-      $token_data = json_decode($result, true);
-      $token_data['expires_at'] = time() + $token_data['expires_in'];
+var (
+	clientID     = getEnv("GLOO_CLIENT_ID", "YOUR_CLIENT_ID")
+	clientSecret = getEnv("GLOO_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
+	tokenURL     = "https://platform.ai.gloo.com/oauth2/token"
+)
 
-      return $token_data;
-  }
+type TokenInfo struct {
+	AccessToken string `json:"access_token"`
+	ExpiresIn   int    `json:"expires_in"`
+	ExpiresAt   int64  `json:"expires_at"`
+	TokenType   string `json:"token_type"`
+}
 
-  // Example usage
-  $token_info = getAccessToken($CLIENT_ID, $CLIENT_SECRET, $TOKEN_URL);
-  echo "Access token: " . $token_info['access_token'] . "\n";
-  echo "Expires in: " . $token_info['expires_in'] . " seconds\n";
-  ?>
-  ```
+func getAccessToken() (*TokenInfo, error) {
+	data := strings.NewReader("grant_type=client_credentials&scope=api/access")
+	req, err := http.NewRequest("POST", tokenURL, data)
+	if err != nil {
+		return nil, err
+	}
 
-  ```go Go theme={null}
-  package main
+	req.SetBasicAuth(clientID, clientSecret)
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
-  import (
-  	"encoding/json"
-  	"fmt"
-  	"io/ioutil"
-  	"net/http"
-  	"os"
-  	"strings"
-  	"time"
-  )
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
-  var (
-  	clientID     = getEnv("GLOO_CLIENT_ID", "YOUR_CLIENT_ID")
-  	clientSecret = getEnv("GLOO_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
-  	tokenURL     = "https://platform.ai.gloo.com/oauth2/token"
-  )
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to get token: %s - %s", resp.Status, string(bodyBytes))
+	}
 
-  type TokenInfo struct {
-  	AccessToken string `json:"access_token"`
-  	ExpiresIn   int    `json:"expires_in"`
-  	ExpiresAt   int64  `json:"expires_at"`
-  	TokenType   string `json:"token_type"`
-  }
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
 
-  func getAccessToken() (*TokenInfo, error) {
-  	data := strings.NewReader("grant_type=client_credentials&scope=api/access")
-  	req, err := http.NewRequest("POST", tokenURL, data)
-  	if err != nil {
-  		return nil, err
-  	}
+	var token TokenInfo
+	if err := json.Unmarshal(body, &token); err != nil {
+		return nil, err
+	}
 
-  	req.SetBasicAuth(clientID, clientSecret)
-  	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	token.ExpiresAt = time.Now().Unix() + int64(token.ExpiresIn)
+	return &token, nil
+}
 
-  	client := &http.Client{}
-  	resp, err := client.Do(req)
-  	if err != nil {
-  		return nil, err
-  	}
-  	defer resp.Body.Close()
+func getEnv(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return value
+	}
+	return fallback
+}
 
-  	if resp.StatusCode != http.StatusOK {
-  		bodyBytes, _ := ioutil.ReadAll(resp.Body)
-  		return nil, fmt.Errorf("failed to get token: %s - %s", resp.Status, string(bodyBytes))
-  	}
+// Example usage
+func main() {
+	tokenInfo, err := getAccessToken()
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
 
-  	body, err := ioutil.ReadAll(resp.Body)
-  	if err != nil {
-  		return nil, err
-  	}
+	fmt.Printf("Access token: %s\n", tokenInfo.AccessToken)
+	fmt.Printf("Expires in: %d seconds\n", tokenInfo.ExpiresIn)
+}
+```
 
-  	var token TokenInfo
-  	if err := json.Unmarshal(body, &token); err != nil {
-  		return nil, err
-  	}
+```java Java theme={null}
+import com.google.gson.Gson;
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Instant;
+import java.util.Base64;
 
-  	token.ExpiresAt = time.Now().Unix() + int64(token.ExpiresIn)
-  	return &token, nil
-  }
+public class AuthManager {
+    private static final String CLIENT_ID = System.getenv().getOrDefault("GLOO_CLIENT_ID", "YOUR_CLIENT_ID");
+    private static final String CLIENT_SECRET = System.getenv().getOrDefault("GLOO_CLIENT_SECRET", "YOUR_CLIENT_SECRET");
+    private static final String TOKEN_URL = "https://platform.ai.gloo.com/oauth2/token";
 
-  func getEnv(key, fallback string) string {
-  	if value, ok := os.LookupEnv(key); ok {
-  		return value
-  	}
-  	return fallback
-  }
+    private static final HttpClient httpClient = HttpClient.newHttpClient();
+    private static final Gson gson = new Gson();
 
-  // Example usage
-  func main() {
-  	tokenInfo, err := getAccessToken()
-  	if err != nil {
-  		fmt.Printf("Error: %v\n", err)
-  		return
-  	}
+    public static class TokenInfo {
+        public String access_token;
+        public int expires_in;
+        public long expires_at;
+        public String token_type;
+    }
 
-  	fmt.Printf("Access token: %s\n", tokenInfo.AccessToken)
-  	fmt.Printf("Expires in: %d seconds\n", tokenInfo.ExpiresIn)
-  }
-  ```
+    public static TokenInfo getAccessToken() throws IOException, InterruptedException {
+        String auth = CLIENT_ID + ":" + CLIENT_SECRET;
+        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
+        String requestBody = "grant_type=client_credentials&scope=api/access";
 
-  ```java Java theme={null}
-  import com.google.gson.Gson;
-  import java.io.IOException;
-  import java.net.URI;
-  import java.net.http.HttpClient;
-  import java.net.http.HttpRequest;
-  import java.net.http.HttpResponse;
-  import java.time.Instant;
-  import java.util.Base64;
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(TOKEN_URL))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .header("Authorization", "Basic " + encodedAuth)
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
 
-  public class AuthManager {
-      private static final String CLIENT_ID = System.getenv().getOrDefault("GLOO_CLIENT_ID", "YOUR_CLIENT_ID");
-      private static final String CLIENT_SECRET = System.getenv().getOrDefault("GLOO_CLIENT_SECRET", "YOUR_CLIENT_SECRET");
-      private static final String TOKEN_URL = "https://platform.ai.gloo.com/oauth2/token";
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-      private static final HttpClient httpClient = HttpClient.newHttpClient();
-      private static final Gson gson = new Gson();
+        if (response.statusCode() != 200) {
+            throw new IOException("Failed to get access token: " + response.body());
+        }
 
-      public static class TokenInfo {
-          public String access_token;
-          public int expires_in;
-          public long expires_at;
-          public String token_type;
-      }
+        TokenInfo token = gson.fromJson(response.body(), TokenInfo.class);
+        token.expires_at = Instant.now().getEpochSecond() + token.expires_in;
 
-      public static TokenInfo getAccessToken() throws IOException, InterruptedException {
-          String auth = CLIENT_ID + ":" + CLIENT_SECRET;
-          String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
-          String requestBody = "grant_type=client_credentials&scope=api/access";
+        return token;
+    }
 
-          HttpRequest request = HttpRequest.newBuilder()
-                  .uri(URI.create(TOKEN_URL))
-                  .header("Content-Type", "application/x-www-form-urlencoded")
-                  .header("Authorization", "Basic " + encodedAuth)
-                  .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                  .build();
+    // Example usage
+    public static void main(String[] args) {
+        try {
+            TokenInfo tokenInfo = getAccessToken();
+            System.out.println("Access token: " + tokenInfo.access_token);
+            System.out.println("Expires in: " + tokenInfo.expires_in + " seconds");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
 
-          HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-          if (response.statusCode() != 200) {
-              throw new IOException("Failed to get access token: " + response.body());
-          }
-
-          TokenInfo token = gson.fromJson(response.body(), TokenInfo.class);
-          token.expires_at = Instant.now().getEpochSecond() + token.expires_in;
-
-          return token;
-      }
-
-      // Example usage
-      public static void main(String[] args) {
-          try {
-              TokenInfo tokenInfo = getAccessToken();
-              System.out.println("Access token: " + tokenInfo.access_token);
-              System.out.println("Expires in: " + tokenInfo.expires_in + " seconds");
-          } catch (Exception e) {
-              e.printStackTrace();
-          }
-      }
-  }
-  ```
 </CodeGroup>
 
 ## Step 3: Token Management
@@ -340,173 +345,175 @@ Access tokens are temporary and expire after a certain period. Implement token m
   # Global token storage
   access_token_info = {}
 
-  def is_token_expired(token_info):
-      """Check if the token is expired or close to expiring."""
-      if not token_info or 'expires_at' not in token_info:
-          return True
-      return time.time() > (token_info['expires_at'] - 60)
+def is_token_expired(token_info):
+"""Check if the token is expired or close to expiring."""
+if not token_info or 'expires_at' not in token_info:
+return True
+return time.time() > (token_info['expires_at'] - 60)
 
-  def ensure_valid_token():
-      """Ensure we have a valid access token."""
-      global access_token_info
-      if is_token_expired(access_token_info):
-          print("Getting new access token...")
-          access_token_info = get_access_token()
-      return access_token_info['access_token']
+def ensure_valid_token():
+"""Ensure we have a valid access token."""
+global access_token_info
+if is_token_expired(access_token_info):
+print("Getting new access token...")
+access_token_info = get_access_token()
+return access_token_info['access_token']
 
-  # Usage in API calls
-  def make_api_call():
-      token = ensure_valid_token()
-      headers = {"Authorization": f"Bearer {token}"}
-      # Make your API call here
-  ```
+# Usage in API calls
 
-  ```javascript JavaScript theme={null}
-  // Global token storage
-  let tokenInfo = {};
+def make_api_call():
+token = ensure_valid_token()
+headers = {"Authorization": f"Bearer {token}"} # Make your API call here
 
-  function isTokenExpired(token) {
-      if (!token || !token.expires_at) return true;
-      return (Date.now() / 1000) > (token.expires_at - 60);
+````
+
+```javascript JavaScript theme={null}
+// Global token storage
+let tokenInfo = {};
+
+function isTokenExpired(token) {
+    if (!token || !token.expires_at) return true;
+    return (Date.now() / 1000) > (token.expires_at - 60);
+}
+
+async function ensureValidToken() {
+    if (isTokenExpired(tokenInfo)) {
+        console.log("Getting new access token...");
+        tokenInfo = await getAccessToken();
+    }
+    return tokenInfo.access_token;
+}
+
+// Usage in API calls
+async function makeApiCall() {
+    const token = await ensureValidToken();
+    const headers = { 'Authorization': `Bearer ${token}` };
+    // Make your API call here
+}
+````
+
+```typescript TypeScript theme={null}
+// Global token storage
+let tokenInfo: TokenInfo | null = null;
+
+function isTokenExpired(token: TokenInfo | null): boolean {
+  if (!token || !(token as any).expires_at) return true;
+  return Date.now() / 1000 > (token as any).expires_at - 60;
+}
+
+async function ensureValidToken(): Promise<string> {
+  if (isTokenExpired(tokenInfo)) {
+    console.log("Getting new access token...");
+    tokenInfo = await getAccessToken();
   }
+  return tokenInfo!.access_token;
+}
 
-  async function ensureValidToken() {
-      if (isTokenExpired(tokenInfo)) {
-          console.log("Getting new access token...");
-          tokenInfo = await getAccessToken();
-      }
-      return tokenInfo.access_token;
-  }
+// Usage in API calls
+async function makeApiCall(): Promise<void> {
+  const token = await ensureValidToken();
+  const headers = { Authorization: `Bearer ${token}` };
+  // Make your API call here
+}
+```
 
-  // Usage in API calls
-  async function makeApiCall() {
-      const token = await ensureValidToken();
-      const headers = { 'Authorization': `Bearer ${token}` };
-      // Make your API call here
-  }
-  ```
+```php PHP theme={null}
+// Global token storage
+$token_info = [];
 
-  ```typescript TypeScript theme={null}
-  // Global token storage
-  let tokenInfo: TokenInfo | null = null;
+function isTokenExpired($token) {
+    if (empty($token) || !isset($token['expires_at'])) {
+        return true;
+    }
+    return time() > ($token['expires_at'] - 60);
+}
 
-  function isTokenExpired(token: TokenInfo | null): boolean {
-      if (!token || !(token as any).expires_at) return true;
-      return (Date.now() / 1000) > ((token as any).expires_at - 60);
-  }
+function ensureValidToken() {
+    global $token_info, $CLIENT_ID, $CLIENT_SECRET, $TOKEN_URL;
 
-  async function ensureValidToken(): Promise<string> {
-      if (isTokenExpired(tokenInfo)) {
-          console.log("Getting new access token...");
-          tokenInfo = await getAccessToken();
-      }
-      return tokenInfo!.access_token;
-  }
+    if (isTokenExpired($token_info)) {
+        echo "Getting new access token...\n";
+        $token_info = getAccessToken($CLIENT_ID, $CLIENT_SECRET, $TOKEN_URL);
+    }
 
-  // Usage in API calls
-  async function makeApiCall(): Promise<void> {
-      const token = await ensureValidToken();
-      const headers = { 'Authorization': `Bearer ${token}` };
-      // Make your API call here
-  }
-  ```
+    return $token_info['access_token'];
+}
 
-  ```php PHP theme={null}
-  // Global token storage
-  $token_info = [];
+// Usage in API calls
+function makeApiCall() {
+    $token = ensureValidToken();
+    $headers = ['Authorization: Bearer ' . $token];
+    // Make your API call here
+}
+```
 
-  function isTokenExpired($token) {
-      if (empty($token) || !isset($token['expires_at'])) {
-          return true;
-      }
-      return time() > ($token['expires_at'] - 60);
-  }
+```go Go theme={null}
+var tokenInfo *TokenInfo
 
-  function ensureValidToken() {
-      global $token_info, $CLIENT_ID, $CLIENT_SECRET, $TOKEN_URL;
+func isTokenExpired(token *TokenInfo) bool {
+	if token == nil || token.ExpiresAt == 0 {
+		return true
+	}
+	return time.Now().Unix() > (token.ExpiresAt - 60)
+}
 
-      if (isTokenExpired($token_info)) {
-          echo "Getting new access token...\n";
-          $token_info = getAccessToken($CLIENT_ID, $CLIENT_SECRET, $TOKEN_URL);
-      }
+func ensureValidToken() (string, error) {
+	if isTokenExpired(tokenInfo) {
+		fmt.Println("Getting new access token...")
+		var err error
+		tokenInfo, err = getAccessToken()
+		if err != nil {
+			return "", err
+		}
+	}
+	return tokenInfo.AccessToken, nil
+}
 
-      return $token_info['access_token'];
-  }
+// Usage in API calls
+func makeApiCall() error {
+	token, err := ensureValidToken()
+	if err != nil {
+		return err
+	}
+	// Use token in Authorization header
+	// Make your API call here
+	return nil
+}
+```
 
-  // Usage in API calls
-  function makeApiCall() {
-      $token = ensureValidToken();
-      $headers = ['Authorization: Bearer ' . $token];
-      // Make your API call here
-  }
-  ```
+```java Java theme={null}
+private static TokenInfo tokenInfo;
 
-  ```go Go theme={null}
-  var tokenInfo *TokenInfo
+public static boolean isTokenExpired(TokenInfo token) {
+    if (token == null || token.expires_at == 0) {
+        return true;
+    }
+    return Instant.now().getEpochSecond() > (token.expires_at - 60);
+}
 
-  func isTokenExpired(token *TokenInfo) bool {
-  	if token == nil || token.ExpiresAt == 0 {
-  		return true
-  	}
-  	return time.Now().Unix() > (token.ExpiresAt - 60)
-  }
+public static String ensureValidToken() throws IOException, InterruptedException {
+    if (isTokenExpired(tokenInfo)) {
+        System.out.println("Getting new access token...");
+        tokenInfo = getAccessToken();
+    }
+    return tokenInfo.access_token;
+}
 
-  func ensureValidToken() (string, error) {
-  	if isTokenExpired(tokenInfo) {
-  		fmt.Println("Getting new access token...")
-  		var err error
-  		tokenInfo, err = getAccessToken()
-  		if err != nil {
-  			return "", err
-  		}
-  	}
-  	return tokenInfo.AccessToken, nil
-  }
+// Usage in API calls
+public static void makeApiCall() throws IOException, InterruptedException {
+    String token = ensureValidToken();
+    // Use token in Authorization header
+    // Make your API call here
+}
+```
 
-  // Usage in API calls
-  func makeApiCall() error {
-  	token, err := ensureValidToken()
-  	if err != nil {
-  		return err
-  	}
-  	// Use token in Authorization header
-  	// Make your API call here
-  	return nil
-  }
-  ```
-
-  ```java Java theme={null}
-  private static TokenInfo tokenInfo;
-
-  public static boolean isTokenExpired(TokenInfo token) {
-      if (token == null || token.expires_at == 0) {
-          return true;
-      }
-      return Instant.now().getEpochSecond() > (token.expires_at - 60);
-  }
-
-  public static String ensureValidToken() throws IOException, InterruptedException {
-      if (isTokenExpired(tokenInfo)) {
-          System.out.println("Getting new access token...");
-          tokenInfo = getAccessToken();
-      }
-      return tokenInfo.access_token;
-  }
-
-  // Usage in API calls
-  public static void makeApiCall() throws IOException, InterruptedException {
-      String token = ensureValidToken();
-      // Use token in Authorization header
-      // Make your API call here
-  }
-  ```
 </CodeGroup>
 
 ## Step 4: Using Tokens in API Calls
 
 Once you have a valid access token, include it in the Authorization header of your API requests:
 
-```http  theme={null}
+```http theme={null}
 Authorization: Bearer YOUR_ACCESS_TOKEN
 ```
 
@@ -516,9 +523,9 @@ Authorization: Bearer YOUR_ACCESS_TOKEN
   ```python Python theme={null}
   import requests
 
-  def make_authenticated_request(endpoint, payload=None):
-      """Make an authenticated API request."""
-      token = ensure_valid_token()
+def make_authenticated_request(endpoint, payload=None):
+"""Make an authenticated API request."""
+token = ensure_valid_token()
 
       headers = {
           "Authorization": f"Bearer {token}",
@@ -533,222 +540,228 @@ Authorization: Bearer YOUR_ACCESS_TOKEN
       response.raise_for_status()
       return response.json()
 
-  # Example usage
-  result = make_authenticated_request(
-      "https://platform.ai.gloo.com/ai/v1/chat/completions",
-      {
-          "model": "us.anthropic.claude-sonnet-4-20250514-v1:0",
-          "messages": [{"role": "user", "content": "Hello!"}]
-      }
-  )
-  ```
+# Example usage
 
-  ```javascript JavaScript theme={null}
-  async function makeAuthenticatedRequest(endpoint, payload = null) {
-      const token = await ensureValidToken();
+result = make_authenticated_request(
+"https://platform.ai.gloo.com/ai/v1/chat/completions",
+{
+"model": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+"messages": [{"role": "user", "content": "Hello!"}]
+}
+)
 
-      const config = {
-          headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-          }
-      };
+````
 
-      if (payload) {
-          const response = await axios.post(endpoint, payload, config);
-          return response.data;
-      } else {
-          const response = await axios.get(endpoint, config);
-          return response.data;
-      }
+```javascript JavaScript theme={null}
+async function makeAuthenticatedRequest(endpoint, payload = null) {
+    const token = await ensureValidToken();
+
+    const config = {
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+        }
+    };
+
+    if (payload) {
+        const response = await axios.post(endpoint, payload, config);
+        return response.data;
+    } else {
+        const response = await axios.get(endpoint, config);
+        return response.data;
+    }
+}
+
+// Example usage
+const result = await makeAuthenticatedRequest(
+    "https://platform.ai.gloo.com/ai/v1/chat/completions",
+    {
+        model: "us.anthropic.claude-sonnet-4-20250514-v1:0",
+        messages: [{ role: "user", content: "Hello!" }]
+    }
+);
+````
+
+```typescript TypeScript theme={null}
+async function makeAuthenticatedRequest(
+  endpoint: string,
+  payload?: any
+): Promise<any> {
+  const token = await ensureValidToken();
+
+  const config = {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  };
+
+  if (payload) {
+    const response = await axios.post(endpoint, payload, config);
+    return response.data;
+  } else {
+    const response = await axios.get(endpoint, config);
+    return response.data;
   }
+}
 
-  // Example usage
-  const result = await makeAuthenticatedRequest(
-      "https://platform.ai.gloo.com/ai/v1/chat/completions",
-      {
-          model: "us.anthropic.claude-sonnet-4-20250514-v1:0",
-          messages: [{ role: "user", content: "Hello!" }]
-      }
-  );
-  ```
-
-  ```typescript TypeScript theme={null}
-  async function makeAuthenticatedRequest(endpoint: string, payload?: any): Promise<any> {
-      const token = await ensureValidToken();
-
-      const config = {
-          headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-          }
-      };
-
-      if (payload) {
-          const response = await axios.post(endpoint, payload, config);
-          return response.data;
-      } else {
-          const response = await axios.get(endpoint, config);
-          return response.data;
-      }
-  }
-
-  // Example usage
-  const result = await makeAuthenticatedRequest(
-      "https://platform.ai.gloo.com/ai/v1/chat/completions",
-      {
-          model: "us.anthropic.claude-sonnet-4-20250514-v1:0",
-          messages: [{ role: "user", content: "Hello!" }]
-      }
-  );
-  ```
-
-  ```php PHP theme={null}
-  function makeAuthenticatedRequest($endpoint, $payload = null) {
-      $token = ensureValidToken();
-
-      $headers = [
-          'Authorization: Bearer ' . $token,
-          'Content-Type: application/json'
-      ];
-
-      $ch = curl_init();
-      curl_setopt($ch, CURLOPT_URL, $endpoint);
-      curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-      curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-
-      if ($payload) {
-          curl_setopt($ch, CURLOPT_POST, 1);
-          curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-      }
-
-      $result = curl_exec($ch);
-      if (curl_errno($ch)) {
-          throw new Exception(curl_error($ch));
-      }
-      curl_close($ch);
-
-      return json_decode($result, true);
-  }
-
-  // Example usage
-  $result = makeAuthenticatedRequest(
-      "https://platform.ai.gloo.com/ai/v1/chat/completions",
-      [
-          'model' => 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-          'messages' => [['role' => 'user', 'content' => 'Hello!']]
-      ]
-  );
-  ```
-
-  ```go Go theme={null}
-  func makeAuthenticatedRequest(endpoint string, payload []byte) ([]byte, error) {
-  	token, err := ensureValidToken()
-  	if err != nil {
-  		return nil, err
-  	}
-
-  	var req *http.Request
-  	if payload != nil {
-  		req, err = http.NewRequest("POST", endpoint, bytes.NewBuffer(payload))
-  	} else {
-  		req, err = http.NewRequest("GET", endpoint, nil)
-  	}
-
-  	if err != nil {
-  		return nil, err
-  	}
-
-  	req.Header.Add("Authorization", "Bearer "+token)
-  	req.Header.Add("Content-Type", "application/json")
-
-  	client := &http.Client{}
-  	resp, err := client.Do(req)
-  	if err != nil {
-  		return nil, err
-  	}
-  	defer resp.Body.Close()
-
-  	return ioutil.ReadAll(resp.Body)
-  }
-
-  // Example usage
-  payload := []byte(`{
-  	"model": "us.anthropic.claude-sonnet-4-20250514-v1:0",
-  	"messages": [{"role": "user", "content": "Hello!"}]
-  }`)
-
-  result, err := makeAuthenticatedRequest(
-  	"https://platform.ai.gloo.com/ai/v1/chat/completions",
-  	payload,
-  )
-  ```
-
-  ```java Java theme={null}
-  public static String makeAuthenticatedRequest(String endpoint, String payload) throws IOException, InterruptedException {
-      String token = ensureValidToken();
-
-      HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-              .uri(URI.create(endpoint))
-              .header("Authorization", "Bearer " + token)
-              .header("Content-Type", "application/json");
-
-      if (payload != null) {
-          requestBuilder.POST(HttpRequest.BodyPublishers.ofString(payload));
-      } else {
-          requestBuilder.GET();
-      }
-
-      HttpRequest request = requestBuilder.build();
-      HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-      if (response.statusCode() != 200) {
-          throw new IOException("API call failed: " + response.body());
-      }
-
-      return response.body();
-  }
-
-  // Example usage
-  String payload = """
+// Example usage
+const result = await makeAuthenticatedRequest(
+  "https://platform.ai.gloo.com/ai/v1/chat/completions",
   {
-      "model": "us.anthropic.claude-sonnet-4-20250514-v1:0",
-      "messages": [{"role": "user", "content": "Hello!"}]
+    model: "us.anthropic.claude-sonnet-4-20250514-v1:0",
+    messages: [{ role: "user", content: "Hello!" }],
   }
-  """;
+);
+```
 
-  String result = makeAuthenticatedRequest(
-      "https://platform.ai.gloo.com/ai/v1/chat/completions",
-      payload
-  );
-  ```
+```php PHP theme={null}
+function makeAuthenticatedRequest($endpoint, $payload = null) {
+    $token = ensureValidToken();
+
+    $headers = [
+        'Authorization: Bearer ' . $token,
+        'Content-Type: application/json'
+    ];
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $endpoint);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+    if ($payload) {
+        curl_setopt($ch, CURLOPT_POST, 1);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+    }
+
+    $result = curl_exec($ch);
+    if (curl_errno($ch)) {
+        throw new Exception(curl_error($ch));
+    }
+    curl_close($ch);
+
+    return json_decode($result, true);
+}
+
+// Example usage
+$result = makeAuthenticatedRequest(
+    "https://platform.ai.gloo.com/ai/v1/chat/completions",
+    [
+        'model' => 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+        'messages' => [['role' => 'user', 'content' => 'Hello!']]
+    ]
+);
+```
+
+```go Go theme={null}
+func makeAuthenticatedRequest(endpoint string, payload []byte) ([]byte, error) {
+	token, err := ensureValidToken()
+	if err != nil {
+		return nil, err
+	}
+
+	var req *http.Request
+	if payload != nil {
+		req, err = http.NewRequest("POST", endpoint, bytes.NewBuffer(payload))
+	} else {
+		req, err = http.NewRequest("GET", endpoint, nil)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Authorization", "Bearer "+token)
+	req.Header.Add("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ioutil.ReadAll(resp.Body)
+}
+
+// Example usage
+payload := []byte(`{
+	"model": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+	"messages": [{"role": "user", "content": "Hello!"}]
+}`)
+
+result, err := makeAuthenticatedRequest(
+	"https://platform.ai.gloo.com/ai/v1/chat/completions",
+	payload,
+)
+```
+
+```java Java theme={null}
+public static String makeAuthenticatedRequest(String endpoint, String payload) throws IOException, InterruptedException {
+    String token = ensureValidToken();
+
+    HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+            .uri(URI.create(endpoint))
+            .header("Authorization", "Bearer " + token)
+            .header("Content-Type", "application/json");
+
+    if (payload != null) {
+        requestBuilder.POST(HttpRequest.BodyPublishers.ofString(payload));
+    } else {
+        requestBuilder.GET();
+    }
+
+    HttpRequest request = requestBuilder.build();
+    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+    if (response.statusCode() != 200) {
+        throw new IOException("API call failed: " + response.body());
+    }
+
+    return response.body();
+}
+
+// Example usage
+String payload = """
+{
+    "model": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+    "messages": [{"role": "user", "content": "Hello!"}]
+}
+""";
+
+String result = makeAuthenticatedRequest(
+    "https://platform.ai.gloo.com/ai/v1/chat/completions",
+    payload
+);
+```
+
 </CodeGroup>
 
 ## Security Best Practices
 
 ### 1. Environment Variables
 
-* Never hardcode credentials in your source code
-* Use environment variables or secure credential storage
-* Add `.env` files to your `.gitignore`
+- Never hardcode credentials in your source code
+- Use environment variables or secure credential storage
+- Add `.env` files to your `.gitignore`
 
 ### 2. Token Storage
 
-* Store tokens securely in memory
-* Don't persist tokens to disk in production
-* Implement proper token rotation
+- Store tokens securely in memory
+- Don't persist tokens to disk in production
+- Implement proper token rotation
 
 ### 3. Network Security
 
-* Always use HTTPS for API calls
-* Implement proper error handling
-* Use secure HTTP client configurations
+- Always use HTTPS for API calls
+- Implement proper error handling
+- Use secure HTTP client configurations
 
 ### 4. Error Handling
 
-* Handle authentication failures gracefully
-* Implement retry logic for transient failures
-* Log authentication events securely
+- Handle authentication failures gracefully
+- Implement retry logic for transient failures
+- Log authentication events securely
 
 ## Common Issues and Solutions
 
@@ -791,135 +804,137 @@ Create a simple test to verify your authentication setup:
           print(f"✗ Authentication failed: {e}")
           return False
 
-  if __name__ == "__main__":
-      test_authentication()
-  ```
+if **name** == "**main**":
+test_authentication()
 
-  ```javascript JavaScript theme={null}
-  async function testAuthentication() {
-      try {
-          // Test token retrieval
-          const tokenInfo = await getAccessToken();
-          console.log("✓ Token retrieved successfully");
-          console.log(`  Token type: ${tokenInfo.token_type}`);
-          console.log(`  Expires in: ${tokenInfo.expires_in} seconds`);
+````
 
-          // Test token validation
-          const token = await ensureValidToken();
-          console.log("✓ Token validation successful");
+```javascript JavaScript theme={null}
+async function testAuthentication() {
+    try {
+        // Test token retrieval
+        const tokenInfo = await getAccessToken();
+        console.log("✓ Token retrieved successfully");
+        console.log(`  Token type: ${tokenInfo.token_type}`);
+        console.log(`  Expires in: ${tokenInfo.expires_in} seconds`);
 
-          return true;
-      } catch (error) {
-          console.error("✗ Authentication failed:", error.message);
-          return false;
-      }
+        // Test token validation
+        const token = await ensureValidToken();
+        console.log("✓ Token validation successful");
+
+        return true;
+    } catch (error) {
+        console.error("✗ Authentication failed:", error.message);
+        return false;
+    }
+}
+
+testAuthentication();
+````
+
+```typescript TypeScript theme={null}
+async function testAuthentication(): Promise<boolean> {
+  try {
+    // Test token retrieval
+    const tokenInfo = await getAccessToken();
+    console.log("✓ Token retrieved successfully");
+    console.log(`  Token type: ${tokenInfo.token_type}`);
+    console.log(`  Expires in: ${tokenInfo.expires_in} seconds`);
+
+    // Test token validation
+    const token = await ensureValidToken();
+    console.log("✓ Token validation successful");
+
+    return true;
+  } catch (error: any) {
+    console.error("✗ Authentication failed:", error.message);
+    return false;
   }
+}
 
-  testAuthentication();
-  ```
+testAuthentication();
+```
 
-  ```typescript TypeScript theme={null}
-  async function testAuthentication(): Promise<boolean> {
-      try {
-          // Test token retrieval
-          const tokenInfo = await getAccessToken();
-          console.log("✓ Token retrieved successfully");
-          console.log(`  Token type: ${tokenInfo.token_type}`);
-          console.log(`  Expires in: ${tokenInfo.expires_in} seconds`);
+```php PHP theme={null}
+function testAuthentication() {
+    try {
+        // Test token retrieval
+        global $CLIENT_ID, $CLIENT_SECRET, $TOKEN_URL;
+        $token_info = getAccessToken($CLIENT_ID, $CLIENT_SECRET, $TOKEN_URL);
+        echo "✓ Token retrieved successfully\n";
+        echo "  Token type: " . $token_info['token_type'] . "\n";
+        echo "  Expires in: " . $token_info['expires_in'] . " seconds\n";
 
-          // Test token validation
-          const token = await ensureValidToken();
-          console.log("✓ Token validation successful");
+        // Test token validation
+        $token = ensureValidToken();
+        echo "✓ Token validation successful\n";
 
-          return true;
-      } catch (error: any) {
-          console.error("✗ Authentication failed:", error.message);
-          return false;
-      }
-  }
+        return true;
+    } catch (Exception $e) {
+        echo "✗ Authentication failed: " . $e->getMessage() . "\n";
+        return false;
+    }
+}
 
-  testAuthentication();
-  ```
+testAuthentication();
+```
 
-  ```php PHP theme={null}
-  function testAuthentication() {
-      try {
-          // Test token retrieval
-          global $CLIENT_ID, $CLIENT_SECRET, $TOKEN_URL;
-          $token_info = getAccessToken($CLIENT_ID, $CLIENT_SECRET, $TOKEN_URL);
-          echo "✓ Token retrieved successfully\n";
-          echo "  Token type: " . $token_info['token_type'] . "\n";
-          echo "  Expires in: " . $token_info['expires_in'] . " seconds\n";
+```go Go theme={null}
+func testAuthentication() bool {
+	fmt.Println("Testing authentication...")
 
-          // Test token validation
-          $token = ensureValidToken();
-          echo "✓ Token validation successful\n";
+	// Test token retrieval
+	tokenInfo, err := getAccessToken()
+	if err != nil {
+		fmt.Printf("✗ Authentication failed: %v\n", err)
+		return false
+	}
 
-          return true;
-      } catch (Exception $e) {
-          echo "✗ Authentication failed: " . $e->getMessage() . "\n";
-          return false;
-      }
-  }
+	fmt.Println("✓ Token retrieved successfully")
+	fmt.Printf("  Token type: %s\n", tokenInfo.TokenType)
+	fmt.Printf("  Expires in: %d seconds\n", tokenInfo.ExpiresIn)
 
-  testAuthentication();
-  ```
+	// Test token validation
+	token, err := ensureValidToken()
+	if err != nil {
+		fmt.Printf("✗ Token validation failed: %v\n", err)
+		return false
+	}
 
-  ```go Go theme={null}
-  func testAuthentication() bool {
-  	fmt.Println("Testing authentication...")
+	fmt.Println("✓ Token validation successful")
+	return true
+}
 
-  	// Test token retrieval
-  	tokenInfo, err := getAccessToken()
-  	if err != nil {
-  		fmt.Printf("✗ Authentication failed: %v\n", err)
-  		return false
-  	}
+func main() {
+	testAuthentication()
+}
+```
 
-  	fmt.Println("✓ Token retrieved successfully")
-  	fmt.Printf("  Token type: %s\n", tokenInfo.TokenType)
-  	fmt.Printf("  Expires in: %d seconds\n", tokenInfo.ExpiresIn)
+```java Java theme={null}
+public static boolean testAuthentication() {
+    try {
+        // Test token retrieval
+        TokenInfo tokenInfo = getAccessToken();
+        System.out.println("✓ Token retrieved successfully");
+        System.out.println("  Token type: " + tokenInfo.token_type);
+        System.out.println("  Expires in: " + tokenInfo.expires_in + " seconds");
 
-  	// Test token validation
-  	token, err := ensureValidToken()
-  	if err != nil {
-  		fmt.Printf("✗ Token validation failed: %v\n", err)
-  		return false
-  	}
+        // Test token validation
+        String token = ensureValidToken();
+        System.out.println("✓ Token validation successful");
 
-  	fmt.Println("✓ Token validation successful")
-  	return true
-  }
+        return true;
+    } catch (Exception e) {
+        System.err.println("✗ Authentication failed: " + e.getMessage());
+        return false;
+    }
+}
 
-  func main() {
-  	testAuthentication()
-  }
-  ```
+public static void main(String[] args) {
+    testAuthentication();
+}
+```
 
-  ```java Java theme={null}
-  public static boolean testAuthentication() {
-      try {
-          // Test token retrieval
-          TokenInfo tokenInfo = getAccessToken();
-          System.out.println("✓ Token retrieved successfully");
-          System.out.println("  Token type: " + tokenInfo.token_type);
-          System.out.println("  Expires in: " + tokenInfo.expires_in + " seconds");
-
-          // Test token validation
-          String token = ensureValidToken();
-          System.out.println("✓ Token validation successful");
-
-          return true;
-      } catch (Exception e) {
-          System.err.println("✗ Authentication failed: " + e.getMessage());
-          return false;
-      }
-  }
-
-  public static void main(String[] args) {
-      testAuthentication();
-  }
-  ```
 </CodeGroup>
 
 ## Working Code Sample
