@@ -30,6 +30,7 @@ Includes V1→V2 migration guide (endpoint change, routing param required, new m
 ### `tutorials/authentication.md` — OAuth2 Authentication
 
 OAuth2 client credentials flow:
+
 1. Get `GLOO_CLIENT_ID` and `GLOO_CLIENT_SECRET` from Gloo AI Studio
 2. POST to `https://platform.ai.gloo.com/oauth2/token` with `grant_type=client_credentials&scope=api/access` using Basic Auth
 3. Returns `access_token` + `expires_in`; use as `Bearer` token
@@ -40,6 +41,7 @@ Multi-language examples: Python, JavaScript, TypeScript, PHP, Go, Java.
 ### `tutorials/completions-v2.md` — Completions V2 Tutorial
 
 Step-by-step usage of all three routing modes with working code in 6 languages. Covers:
+
 - Auto-routing, model family, and direct model selection
 - Streaming responses (SSE format)
 - Tool/function calling (single + multi-step)

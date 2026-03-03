@@ -11,6 +11,7 @@ Gloo AI API documentation for this project's primary AI backend. Covers authenti
 **Detailed index:** `.context/guides/gloo.md`
 
 Files:
+
 - `gloo/api/completions-v2.md` — Completions V2 API reference (routing modes, request/response schema, migration from V1)
 - `gloo/tutorials/authentication.md` — OAuth2 token exchange tutorial (6 languages)
 - `gloo/tutorials/completions-v2.md` — Completions V2 usage tutorial (routing, streaming, tools, traditions)
