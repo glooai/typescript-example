@@ -1,4 +1,5 @@
 packages:
   - .
+  - chatbot
 onlyBuiltDependencies:
   - esbuild
