@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://gloo.com/ai">
+    <img src="assets/gloo-ai-logo.svg" alt="Gloo AI" width="240" />
+  </a>
+</p>
+
 # Gloo AI TypeScript Examples
 
 TypeScript examples for the [Gloo AI](https://www.ai.gloo.com/) platform API — a monorepo with two workspace packages:
