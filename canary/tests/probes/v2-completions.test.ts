@@ -18,7 +18,7 @@ const FAMILY: V2CompletionsFixture = {
   label: "V2 · family",
   prompt: "hi",
   benign: true,
-  routing: { kind: "model_family", family: "anthropic" },
+  routing: { kind: "model_family", family: "Anthropic" },
 };
 
 const DIRECT: V2CompletionsFixture = {
@@ -37,7 +37,7 @@ it("builds request bodies that match each routing mode", () => {
   expect(buildRequestBody(FAMILY)).toEqual({
     messages: [{ role: "user", content: "hi" }],
     auto_routing: false,
-    model_family: "anthropic",
+    model_family: "Anthropic",
   });
   expect(buildRequestBody(DIRECT)).toEqual({
     messages: [{ role: "user", content: "hi" }],

@@ -15,7 +15,12 @@ export type V2CompletionsFixture = {
     | { kind: "auto_routing" }
     | {
         kind: "model_family";
-        family: "openai" | "anthropic" | "google" | "open-source";
+        // Accepted values per the V2 Completions API error response:
+        // "Anthropic, Google, OpenAI, Open Source (case-insensitive)".
+        // We pin the exact server-canonical casing so any change the
+        // platform makes to the accepted values list surfaces as a
+        // canary RED immediately.
+        family: "Anthropic" | "Google" | "OpenAI" | "Open Source";
       }
     | { kind: "model"; model: string };
 };
