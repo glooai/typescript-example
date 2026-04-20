@@ -217,3 +217,81 @@ it("formats recurring-failure thread replies compactly", () => {
   expect(text).toContain("500");
   expect(text).toContain("123ms");
 });
+
+it("surfaces contentPreview over responsePreview for REFUSAL_REGRESSION alerts", () => {
+  // The refusal text is the money info for the on-caller. Before the
+  // fix, formatFailureTopLevel only showed the JSON envelope — burying
+  // the actual refusal inside a JSON blob.
+  const text = formatFailureTopLevel(
+    makeOutcome({
+      verdict: "REFUSAL_REGRESSION",
+      severity: "RED",
+      httpStatus: 200,
+      responsePreview:
+        '{"choices":[{"message":{"content":"I cant help with that. Unsafe drug use is dangerous."}}]}',
+      contentPreview: "I cant help with that. Unsafe drug use is dangerous.",
+    }),
+    CONFIG
+  );
+  expect(text).toContain("Content:");
+  expect(text).toContain("I cant help with that");
+  expect(text).not.toContain("Response:"); // responsePreview suppressed when contentPreview is present
+});
+
+it("falls back to responsePreview when no contentPreview (5xx / schema failures)", () => {
+  const text = formatFailureTopLevel(
+    makeOutcome({
+      verdict: "FAIL",
+      severity: "RED",
+      httpStatus: 503,
+      responsePreview: '{"detail":"upstream unavailable"}',
+      contentPreview: null,
+    }),
+    CONFIG
+  );
+  expect(text).toContain("Response:");
+  expect(text).toContain("upstream unavailable");
+  expect(text).not.toContain("Content:");
+});
+
+it("keeps reconciling + persisting state when a Slack post throws (R1)", async () => {
+  // Before the fix, a single slack.post() failure would bubble out of
+  // reconcileFailures and abort the state-file write — causing every
+  // previously-alerted failure to re-post as new on the next run.
+  const gcs = fakeGcs({});
+  let postCallCount = 0;
+  const slack: SlackClient & { posts: Array<{ text: string }> } = {
+    posts: [],
+    async post({ text }) {
+      postCallCount++;
+      // First post (new "v1/flaky") throws. Second post (new "v1/ok")
+      // succeeds. The state write at the end MUST still happen with
+      // "v1/ok" recorded and "v1/flaky" deliberately absent.
+      if (postCallCount === 1) {
+        throw new Error("slack rate_limited");
+      }
+      this.posts.push({ text });
+      return { ts: "1700000000.000001", channel: "C" };
+    },
+    async react() {},
+  };
+  const artifact: RunArtifact = {
+    runId: "run-abc",
+    startedAt: NOW.toISOString(),
+    completedAt: NOW.toISOString(),
+    outcomes: [
+      makeOutcome({ signature: "v1/flaky", verdict: "FAIL", severity: "RED" }),
+      makeOutcome({ signature: "v1/ok", verdict: "FAIL", severity: "RED" }),
+    ],
+  };
+
+  await reconcileFailures(artifact, { probes: [], gcs, slack }, CONFIG, NOW);
+
+  // State file WAS written despite the first Slack post throwing.
+  const state = gcs.writes.get("state/active-failures.json") as ActiveFailures;
+  expect(state).toBeDefined();
+  // The successful post landed in state.
+  expect(state["v1/ok"]).toBeDefined();
+  // The failed post is NOT in state, so next run treats it as new and retries.
+  expect(state["v1/flaky"]).toBeUndefined();
+});

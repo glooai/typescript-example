@@ -86,47 +86,78 @@ export async function reconcileFailures(
     if (o.severity === "RED") failuresBySignature.set(o.signature, o);
   }
 
-  // 1. Handle current failures (new or recurring).
+  // 1. Handle current failures (new or recurring). Slack failures are
+  //    non-fatal per-signature so one bad post (rate-limited, transient
+  //    network blip, missing scope) doesn't abort the whole loop and
+  //    leave the state file unwritten — which would cause every
+  //    already-alerted failure to re-post as new on the next run.
   for (const [signature, outcome] of failuresBySignature) {
     const prior = next[signature];
     if (!prior) {
       const topLevelText = formatFailureTopLevel(outcome, config);
-      const posted = await deps.slack.post({ text: topLevelText });
-      next[signature] = {
-        firstSeenAt: now.toISOString(),
-        lastSeenAt: now.toISOString(),
-        slackTs: posted.ts,
-        attempts: 1,
-        lastVerdict: outcome.verdict,
-      };
+      try {
+        const posted = await deps.slack.post({ text: topLevelText });
+        next[signature] = {
+          firstSeenAt: now.toISOString(),
+          lastSeenAt: now.toISOString(),
+          slackTs: posted.ts,
+          attempts: 1,
+          lastVerdict: outcome.verdict,
+        };
+      } catch (error) {
+        // Don't record the signature in state — next run treats it as
+        // new and retries the top-level alert.
+        // eslint-disable-next-line no-console
+        console.warn(
+          `slack.post (new ${signature}) failed: ${(error as Error).message}`
+        );
+      }
     } else {
       const recurringText = formatFailureRecurring(outcome, prior.attempts + 1);
-      await deps.slack.post({ text: recurringText, threadTs: prior.slackTs });
-      next[signature] = {
-        ...prior,
-        lastSeenAt: now.toISOString(),
-        attempts: prior.attempts + 1,
-        lastVerdict: outcome.verdict,
-      };
+      try {
+        await deps.slack.post({ text: recurringText, threadTs: prior.slackTs });
+        next[signature] = {
+          ...prior,
+          lastSeenAt: now.toISOString(),
+          attempts: prior.attempts + 1,
+          lastVerdict: outcome.verdict,
+        };
+      } catch (error) {
+        // Keep prior state unchanged; reconciler will retry the thread
+        // reply on the next run.
+        // eslint-disable-next-line no-console
+        console.warn(
+          `slack.post (recurring ${signature}) failed: ${(error as Error).message}`
+        );
+      }
     }
   }
 
   // 2. Handle recoveries — signatures previously failing, now passing.
+  //    Recovery failures are also non-fatal: leave the state entry in
+  //    place so the next run retries the recovery message.
   for (const signature of Object.keys(existing)) {
     if (!failuresBySignature.has(signature)) {
       const priorTs = existing[signature].slackTs;
-      await deps.slack.post({
-        text: `:white_check_mark: Recovered — probe \`${signature}\` is passing again as of ${now.toISOString()}.`,
-        threadTs: priorTs,
-      });
       try {
-        await deps.slack.react(priorTs, "white_check_mark");
+        await deps.slack.post({
+          text: `:white_check_mark: Recovered — probe \`${signature}\` is passing again as of ${now.toISOString()}.`,
+          threadTs: priorTs,
+        });
+        try {
+          await deps.slack.react(priorTs, "white_check_mark");
+        } catch (error) {
+          // Already-reacted or missing scope — not fatal.
+          // eslint-disable-next-line no-console
+          console.warn(`reactions.add skipped: ${(error as Error).message}`);
+        }
+        delete next[signature];
       } catch (error) {
-        // Already-reacted or missing scope — not fatal.
         // eslint-disable-next-line no-console
-        console.warn(`reactions.add skipped: ${(error as Error).message}`);
+        console.warn(
+          `slack.post (recovery ${signature}) failed: ${(error as Error).message}`
+        );
       }
-      delete next[signature];
     }
   }
 
@@ -138,9 +169,18 @@ export function formatFailureTopLevel(
   config: CanaryConfig
 ): string {
   const model = outcome.model ? `\n• *Model:* \`${outcome.model}\`` : "";
-  const preview = outcome.responsePreview
-    ? `\n• *Response:* \`\`\`${outcome.responsePreview.slice(0, 500)}\`\`\``
-    : "";
+  // Prefer `contentPreview` when available — for REFUSAL_REGRESSION
+  // verdicts it holds the actual refusal text (first ~400 chars), which
+  // is the money info for whoever gets paged. Fall back to the raw
+  // response envelope for non-content failures (5xx, schema mismatch,
+  // empty completion). Probes already truncate both fields, so no
+  // secondary slice is needed here.
+  let preview = "";
+  if (outcome.contentPreview) {
+    preview = `\n• *Content:* \`\`\`${outcome.contentPreview}\`\`\``;
+  } else if (outcome.responsePreview) {
+    preview = `\n• *Response:* \`\`\`${outcome.responsePreview}\`\`\``;
+  }
   return [
     `:rotating_light: *Canary RED — ${outcome.label}*`,
     `• *Signature:* \`${outcome.signature}\``,

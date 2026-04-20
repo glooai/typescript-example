@@ -41,7 +41,18 @@ export type DigestSummary = {
   };
 };
 
-/** List run artifacts in the last 24h by walking the GCS prefix. */
+/** ms in one hour — used for 24h window math. */
+const ONE_HOUR_MS = 3_600_000;
+
+/** How far back the digest window looks — the daily-digest promise. */
+const WINDOW_HOURS = 24;
+
+/**
+ * List run artifacts strictly within the last 24h. We over-fetch hourly
+ * prefixes (26 hours covers day-boundary UTC offsets cleanly) and then
+ * filter the returned artifacts by their `startedAt` so the digest
+ * reflects exactly the promised 24h window, not ~26h.
+ */
 export async function loadWindow(
   gcs: GcsClient,
   now: Date = new Date()
@@ -49,6 +60,7 @@ export async function loadWindow(
   const prefix24h = buildRunPrefixes(now);
   const seen = new Set<string>();
   const artifacts: RunArtifact[] = [];
+  const cutoffMs = now.getTime() - WINDOW_HOURS * ONE_HOUR_MS;
 
   for (const prefix of prefix24h) {
     const names = await gcs.list(prefix);
@@ -56,7 +68,9 @@ export async function loadWindow(
       if (seen.has(name)) continue;
       seen.add(name);
       const payload = await gcs.readJson<RunArtifact>(name);
-      if (payload) artifacts.push(payload);
+      if (!payload) continue;
+      if (new Date(payload.startedAt).getTime() < cutoffMs) continue;
+      artifacts.push(payload);
     }
   }
   return artifacts.sort((a, b) =>
