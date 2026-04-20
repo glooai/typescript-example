@@ -61,7 +61,42 @@ pnpm glooai:items           # List items
 pnpm glooai:items:metadata  # Item metadata
 pnpm glooai:search          # Semantic search
 pnpm glooai:jwt             # Decode and inspect access token
+pnpm glooai:sonnet-4-repro  # Side-by-side: V1 Sonnet 4 vs. V2 Sonnet 4.5 / Haiku 4.5
 ```
+
+### Sonnet 4 V1→V2 reduced repro
+
+`scripts/src/sonnet-4-repro.ts` is a side-by-side repro that compares the
+legacy **V1 Messages** endpoint using the deprecated Anthropic Bedrock
+inference profile `us.anthropic.claude-sonnet-4-20250514-v1:0` against
+**V2 Completions** using the currently-supported Gloo aliases. It is
+intended as a reduced test case for validating model routing and lifecycle
+behavior after Anthropic's 2026-04-14 Sonnet 4 deprecation announcement.
+
+Observed failure signatures on V1 with the deprecated model ID include
+both HTTP 5xx with `{"detail":"Error generating response."}` and HTTP 200
+with an empty `choices[0].message.content`. The verdict classifier handles
+both — the exact signature varies by tenant/region routing.
+
+The script runs three calls back-to-back against the same JWT so you can
+diff them:
+
+| #   | Endpoint                  | Model                                        | Purpose                                            |
+| --- | ------------------------- | -------------------------------------------- | -------------------------------------------------- |
+| 1   | `/ai/v1/chat/completions` | `us.anthropic.claude-sonnet-4-20250514-v1:0` | Deprecated Sonnet 4 under test (expected FAIL)     |
+| 2   | `/ai/v2/chat/completions` | `gloo-anthropic-claude-sonnet-4.5`           | Supported Sonnet 4.5 alias on V2                   |
+| 3   | `/ai/v2/chat/completions` | `gloo-anthropic-claude-haiku-4.5`            | Supported Haiku 4.5 alias — faster/cheaper drop-in |
+
+**Anthropic lifecycle context** (publicly announced 2026-04-14):
+
+- `claude-sonnet-4-20250514` is marked **Deprecated** with a retirement date of
+  **2026-06-15**.
+- API users may see **degraded availability starting 2026-05-14**.
+- `claude-sonnet-4-5-20250929` and `claude-haiku-4-5-20251001` remain **Active**
+  with no retirement sooner than 2026-09-29 / 2026-10-15 respectively.
+
+Any workload still pinned to the retiring Sonnet 4 model ID should plan an
+upgrade path before 2026-05-14.
 
 ## Development
 
