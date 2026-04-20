@@ -13,3 +13,11 @@ output
 pr.md
 .claude/worktrees
 .turbo
+
+# Terraform
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.auto.tfvars.example
