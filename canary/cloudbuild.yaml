@@ -1,0 +1,28 @@
+# Cloud Build config for the canary image. Invoked from the repo root so
+# the Docker build context has access to pnpm-workspace.yaml, scripts/, and
+# canary/ — all three are needed because canary depends on @glooai/scripts
+# via a pnpm workspace link.
+#
+# Usage: gcloud builds submit . --project=glooai --region=us-central1 \
+#          --config=canary/cloudbuild.yaml --substitutions=_TAG=<git-sha>
+
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "--file=canary/Dockerfile"
+      - "--tag=us-central1-docker.pkg.dev/$PROJECT_ID/canary/canary:${_TAG}"
+      - "--tag=us-central1-docker.pkg.dev/$PROJECT_ID/canary/canary:latest"
+      - "."
+
+images:
+  - "us-central1-docker.pkg.dev/$PROJECT_ID/canary/canary:${_TAG}"
+  - "us-central1-docker.pkg.dev/$PROJECT_ID/canary/canary:latest"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: "900s"
+
+substitutions:
+  _TAG: "latest"

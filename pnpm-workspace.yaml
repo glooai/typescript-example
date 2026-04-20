@@ -1,4 +1,5 @@
 packages:
+  - canary
   - chatbot
   - scripts
 onlyBuiltDependencies:

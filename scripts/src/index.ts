@@ -6,6 +6,7 @@ import {
   loadCredentials,
   getAccessToken,
   fetchJson,
+  withTimeout,
   type Credentials,
   type TokenResponse,
 } from "./auth.js";
@@ -13,6 +14,8 @@ import {
 export {
   loadCredentials,
   getAccessToken,
+  fetchJson,
+  withTimeout,
   type Credentials,
   type TokenResponse,
 };
