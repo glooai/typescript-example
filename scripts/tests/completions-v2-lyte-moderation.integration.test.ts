@@ -53,11 +53,20 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: resolve(__dirname, "../../.env.local") });
 
-function credsAvailable(): boolean {
-  return Boolean(
-    (process.env.GLOO_CLIENT_ID ?? process.env.GLOO_AI_CLIENT_ID) &&
-      (process.env.GLOO_CLIENT_SECRET ?? process.env.GLOO_AI_CLIENT_SECRET)
-  );
+// CI (see .github/workflows/ci.yaml) exports placeholder `test-*` credentials
+// so other unit tests can call loadCredentials() against a mocked fetch. Those
+// values are not valid against the live OAuth server, so the integration suite
+// must treat them as "no creds" and skip. Any cred value starting with
+// `test-` is considered a placeholder.
+function isPlaceholder(value: string | undefined): boolean {
+  return !value || value.startsWith("test-");
+}
+
+export function credsAvailable(): boolean {
+  const id = process.env.GLOO_CLIENT_ID ?? process.env.GLOO_AI_CLIENT_ID;
+  const secret =
+    process.env.GLOO_CLIENT_SECRET ?? process.env.GLOO_AI_CLIENT_SECRET;
+  return !isPlaceholder(id) && !isPlaceholder(secret);
 }
 
 // Verbatim prompts from the Slack screenshots — do not edit.
@@ -121,15 +130,27 @@ const ATTEMPTS_PER_CASE = 3;
 describe.skipIf(!credsAvailable())(
   "Completions V2 — LYTE over-aggressive moderation reproducer (integration)",
   () => {
-    let accessToken: string;
+    let accessToken = "";
+    let tokenError: Error | undefined;
 
     beforeAll(async () => {
+      // Defensive: if credsAvailable() ever returns true for invalid creds
+      // (e.g., rotated secrets in CI), record the error so tests can skip
+      // cleanly instead of failing the whole suite.
       const creds: Credentials = loadCredentials();
-      const token = await getAccessToken(creds);
-      if (!token.access_token) {
-        throw new Error("Access token missing from token response.");
+      try {
+        const token = await getAccessToken(creds);
+        if (!token.access_token) {
+          throw new Error("Access token missing from token response.");
+        }
+        accessToken = token.access_token;
+      } catch (error) {
+        tokenError = error as Error;
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[integration] Skipping — token fetch failed: ${tokenError.message}`
+        );
       }
-      accessToken = token.access_token;
     }, 30_000);
 
     for (const routing of ROUTING_CASES) {
@@ -148,6 +169,12 @@ describe.skipIf(!credsAvailable())(
         register(
           `does not refuse benign homestead/tax question [${routing.label}][${shape.label}]`,
           async () => {
+            if (!accessToken) {
+              throw new Error(
+                `[integration] No access token — token fetch failed in beforeAll: ${tokenError?.message ?? "unknown"}`
+              );
+            }
+
             const refusals: string[] = [];
             const replies: string[] = [];
 
