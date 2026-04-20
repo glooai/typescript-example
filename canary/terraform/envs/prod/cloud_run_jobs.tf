@@ -32,11 +32,13 @@ locals {
 }
 
 resource "google_cloud_run_v2_job" "canary_probe" {
-  name     = "canary-probe"
-  location = var.region
-  project  = var.project_id
+  name                = "canary-probe"
+  location            = var.region
+  project             = var.project_id
+  deletion_protection = false
 
   template {
+
     template {
       service_account = google_service_account.canary_runner.email
       timeout         = "600s"
@@ -88,9 +90,10 @@ resource "google_cloud_run_v2_job" "canary_probe" {
 }
 
 resource "google_cloud_run_v2_job" "canary_digest" {
-  name     = "canary-digest"
-  location = var.region
-  project  = var.project_id
+  name                = "canary-digest"
+  location            = var.region
+  project             = var.project_id
+  deletion_protection = false
 
   template {
     template {

@@ -26,8 +26,10 @@ COPY canary ./canary
 RUN pnpm --filter @glooai/scripts build \
  && pnpm --filter @glooai/canary build
 
-# Prune devDependencies for the runtime image.
-RUN pnpm --filter @glooai/canary deploy --prod /runtime
+# Prune devDependencies for the runtime image. `--legacy` is required on
+# pnpm v10+ when workspace deps aren't injected (we use workspace:* links,
+# not injected deps).
+RUN pnpm --filter @glooai/canary deploy --prod --legacy /runtime
 
 # ---
 

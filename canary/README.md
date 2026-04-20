@@ -12,12 +12,25 @@ model-alias breakage, routing regressions, or safety-layer over-moderation
 
 ## What it probes
 
-Currently (fixture-driven — add more in `src/fixtures/index.ts`):
+Fixture-driven in `src/fixtures/index.ts` — add new cases there, no code changes needed elsewhere.
 
-| Endpoint                  | Cases                                                                                                                                             |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/ai/v1/chat/completions` | `meta.llama3-70b-instruct`, the known-deprecated `claude-sonnet-4-20250514` (canary for when the V1 alias is finally removed)                     |
-| `/ai/v2/chat/completions` | `auto_routing`, `model_family` × {anthropic, openai, google}, direct `gloo-anthropic-claude-sonnet-4.5`, direct `gloo-anthropic-claude-haiku-4.5` |
+**V1 Messages** (`/ai/v1/chat/completions`) — 2 fixtures:
+
+- `meta.llama3-70b-instruct-v1:0`
+- `us.anthropic.claude-sonnet-4-20250514-v1:0` (deprecated; canary for when Gloo removes the V1 alias on / before 2026-06-15)
+
+**V2 Completions** (`/ai/v2/chat/completions`) — 20 fixtures:
+
+- Routing-mode probes (5):
+  - `auto_routing: true`
+  - `model_family: anthropic | openai | google | open-source`
+- Direct-model probes (15) — one per supported alias from `.context/guides/gloo/api/supported-models.md`:
+  - **Anthropic:** Haiku 4.5, Sonnet 4.5, Opus 4.5
+  - **Google:** Gemini 2.5 Flash Lite, Flash, Pro · Gemini 3 Pro preview
+  - **OpenAI:** GPT-5 Nano, Mini, Pro · GPT-5.2
+  - **Open source:** Llama 3.1 8B · DeepSeek V3.1 · DeepSeek V3.2 · GPT OSS 120B
+
+Total: **22 probe executions** per scheduled run (6×/day → 132 executions/day).
 
 Every probe uses a benign technical-writing prompt and asserts the response:
 
