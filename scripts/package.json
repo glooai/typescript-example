@@ -16,7 +16,8 @@
     "glooai:items:metadata": "tsx src/items-metadata.ts",
     "glooai:search": "tsx src/search.ts",
     "glooai:jwt": "tsx src/jwt-check.ts",
-    "glooai:sonnet-4-repro": "tsx src/sonnet-4-repro.ts"
+    "glooai:sonnet-4-repro": "tsx src/sonnet-4-repro.ts",
+    "glooai:model-family-repro": "tsx src/completions-v2-model-family-repro.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
