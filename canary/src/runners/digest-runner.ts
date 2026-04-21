@@ -18,6 +18,35 @@ export type DigestDeps = {
   slack: SlackClient;
 };
 
+/**
+ * One failing run inside the 24h window. We keep just the fields the
+ * per-probe thread reply needs so the digest summary stays compact —
+ * the full response payloads already live in the per-failure
+ * `Canary RED` top-level alerts and in GCS-archived run artifacts.
+ */
+export type PerProbeFailure = {
+  verdict: Verdict;
+  httpStatus: number | null;
+  durationMs: number;
+  /** Unix seconds — same as ProbeOutcome.completedAt. */
+  completedAt: number;
+};
+
+export type PerProbeEntry = {
+  signature: string;
+  label: string;
+  total: number;
+  passing: number;
+  failing: number;
+  p50Ms: number;
+  p99Ms: number;
+  /**
+   * Failure details for the threaded breakdown — only populated when
+   * `failing > 0`. Sorted oldest → newest.
+   */
+  failures: PerProbeFailure[];
+};
+
 export type DigestSummary = {
   windowStart: string;
   windowEnd: string;
@@ -25,15 +54,7 @@ export type DigestSummary = {
   probesRun: number;
   severityCounts: Record<Severity, number>;
   verdictCounts: Record<Verdict, number>;
-  perProbe: Array<{
-    signature: string;
-    label: string;
-    total: number;
-    passing: number;
-    failing: number;
-    p50Ms: number;
-    p99Ms: number;
-  }>;
+  perProbe: PerProbeEntry[];
   archival: {
     objectCount: number;
     oldestAgeDays: number | null;
@@ -104,7 +125,13 @@ export function summarize(
   const earliest = artifacts[0]?.startedAt ?? now.toISOString();
   const perProbeAgg = new Map<
     string,
-    { label: string; durations: number[]; passing: number; failing: number }
+    {
+      label: string;
+      durations: number[];
+      passing: number;
+      failing: number;
+      failures: PerProbeFailure[];
+    }
   >();
   const severityCounts: Record<Severity, number> = {
     RED: 0,
@@ -130,15 +157,29 @@ export function summarize(
         durations: [],
         passing: 0,
         failing: 0,
+        failures: [],
       };
       entry.durations.push(outcome.durationMs);
       if (outcome.verdict === "PASS") entry.passing++;
-      else entry.failing++;
+      else {
+        entry.failing++;
+        // Only RED-severity outcomes go in the failure breakdown —
+        // YELLOW is reserved for soft signals (latency anomalies,
+        // routing shifts) surfaced in the separate YELLOW thread.
+        if (outcome.severity === "RED") {
+          entry.failures.push({
+            verdict: outcome.verdict,
+            httpStatus: outcome.httpStatus,
+            durationMs: outcome.durationMs,
+            completedAt: outcome.completedAt,
+          });
+        }
+      }
       perProbeAgg.set(outcome.signature, entry);
     }
   }
 
-  const perProbe = Array.from(perProbeAgg.entries()).map(
+  const perProbe: PerProbeEntry[] = Array.from(perProbeAgg.entries()).map(
     ([signature, entry]) => ({
       signature,
       label: entry.label,
@@ -147,6 +188,9 @@ export function summarize(
       failing: entry.failing,
       p50Ms: percentile(entry.durations, 0.5),
       p99Ms: percentile(entry.durations, 0.99),
+      failures: [...entry.failures].sort(
+        (a, b) => a.completedAt - b.completedAt
+      ),
     })
   );
   perProbe.sort((a, b) => a.label.localeCompare(b.label));
@@ -218,6 +262,27 @@ export async function runDigest(
     });
   }
 
+  // Post a threaded breakdown for each probe with failures, so the
+  // top-level digest stays scannable while a curious reader can click
+  // into the thread to see what "N/M pass" actually means for a given
+  // probe (verdict mix, HTTP status mix, most recent failure). Each
+  // reply is posted independently with error-swallowing so one bad
+  // reply doesn't block the others.
+  for (const probe of summary.perProbe) {
+    if (probe.failing === 0) continue;
+    try {
+      await deps.slack.post({
+        text: formatProbeFailureThread(probe),
+        threadTs: posted.ts,
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `slack.post (digest thread ${probe.signature}) failed: ${(error as Error).message}`
+      );
+    }
+  }
+
   return summary;
 }
 
@@ -241,11 +306,17 @@ export function formatDigestTopLevel(summary: DigestSummary): string {
   const emoji = red > 0 ? ":rotating_light:" : ":large_green_circle:";
   const header = `${emoji} *Gloo AI Canary — 24h Digest*`;
 
+  // Prefix every per-probe bullet with a 🔴/🟢 glyph so a reader can
+  // spot the failing probes at a glance — the previous "5/8 pass"
+  // numeric-only format buried zero-pass probes in a wall of identical
+  // bullets. We key off `failing > 0` rather than severityCounts so a
+  // probe that emitted only YELLOW outcomes (no RED, no PASS) still
+  // renders green here; the RED glyph is load-bearing.
   const perProbeLines = summary.perProbe
-    .map(
-      (p) =>
-        `• \`${p.signature}\` — ${p.passing}/${p.total} pass · p50 ${p.p50Ms}ms · p99 ${p.p99Ms}ms`
-    )
+    .map((p) => {
+      const glyph = p.failing > 0 ? "🔴" : "🟢";
+      return `• ${glyph} \`${p.signature}\` — ${p.passing}/${p.total} pass · p50 ${p.p50Ms}ms · p99 ${p.p99Ms}ms`;
+    })
     .join("\n");
 
   const archival = summary.archival;
@@ -262,6 +333,49 @@ export function formatDigestTopLevel(summary: DigestSummary): string {
     "",
     archivalLine,
   ].join("\n");
+}
+
+/**
+ * Thread-reply text for one failing probe. Expands what "N/M pass"
+ * means in the top-level digest: how many runs the probe had in the
+ * 24h window, the verdict and HTTP-status mix across the failing
+ * runs, and when the most recent failure happened. Response bodies
+ * are intentionally omitted — those live in the per-failure
+ * `Canary RED` top-level alerts, and duplicating them here would
+ * just bloat the thread.
+ */
+export function formatProbeFailureThread(probe: PerProbeEntry): string {
+  const verdictMix = countMix(probe.failures.map((f) => f.verdict));
+  const statusMix = countMix(
+    probe.failures.map((f) =>
+      f.httpStatus === null ? "network error" : String(f.httpStatus)
+    )
+  );
+  const mostRecent = probe.failures[probe.failures.length - 1];
+  const mostRecentLine = mostRecent
+    ? `• Most recent failure: ${new Date(mostRecent.completedAt * 1000).toISOString()} (${mostRecent.durationMs}ms)`
+    : "• Most recent failure: _none recorded_";
+
+  return [
+    `🔴 *Breakdown for \`${probe.signature}\`* — ${probe.label}`,
+    `• Runs in the 24h window: ${probe.total} (one outcome per probe-runner execution)`,
+    `• Passed: ${probe.passing} · Failed: ${probe.failing}`,
+    `• Failure verdicts: ${verdictMix || "_none_"}`,
+    `• HTTP statuses on failures: ${statusMix || "_none_"}`,
+    mostRecentLine,
+    `• Latency across all runs: p50 ${probe.p50Ms}ms · p99 ${probe.p99Ms}ms`,
+    `_See the top-level \`Canary RED — …\` alerts for this signature for the full response payloads._`,
+  ].join("\n");
+}
+
+/** Small utility: "FAIL × 3, SCHEMA_MISMATCH × 1". */
+export function countMix(values: string[]): string {
+  const counts = new Map<string, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([k, n]) => `${k} × ${n}`)
+    .join(", ");
 }
 
 export function humanBytes(bytes: number): string {

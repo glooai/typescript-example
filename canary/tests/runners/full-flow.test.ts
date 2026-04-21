@@ -301,3 +301,78 @@ it("runDigest skips the YELLOW thread when there are no yellow notes", async () 
   await runDigest(CONFIG, { gcs, slack }, new Date("2026-04-20T18:00:00Z"));
   expect(slack.posts).toHaveLength(1);
 });
+
+it("runDigest posts one threaded breakdown per red probe", async () => {
+  // Two failing probes (v1/bad and v2/meh) plus one passing probe.
+  // We expect exactly 3 slack.post calls: the top-level digest plus
+  // one threaded reply per failing probe. No YELLOW thread this run.
+  const artifact: RunArtifact = {
+    runId: "r",
+    startedAt: "2026-04-20T06:00:00Z",
+    completedAt: "2026-04-20T06:00:30Z",
+    outcomes: [
+      {
+        signature: "v2/auto",
+        label: "V2 · auto",
+        endpoint: "u",
+        apiVersion: "v2",
+        httpStatus: 200,
+        verdict: "PASS",
+        severity: "GREEN",
+        durationMs: 1000,
+        details: {},
+        completedAt: 1700000000,
+      },
+      {
+        signature: "v1/bad",
+        label: "V1 · bad",
+        endpoint: "u",
+        apiVersion: "v1",
+        httpStatus: 503,
+        verdict: "FAIL",
+        severity: "RED",
+        durationMs: 2643,
+        details: {},
+        completedAt: 1700000100,
+      },
+      {
+        signature: "v2/meh",
+        label: "V2 · meh",
+        endpoint: "u",
+        apiVersion: "v2",
+        httpStatus: 200,
+        verdict: "EMPTY_COMPLETION",
+        severity: "RED",
+        durationMs: 4000,
+        details: {},
+        completedAt: 1700000200,
+      },
+    ],
+  };
+
+  const gcs = fakeGcs({
+    files: { "runs/2026/04/20/06-r.json": artifact },
+    list: ["runs/2026/04/20/06-r.json"],
+  });
+  const slack = fakeSlack();
+
+  await runDigest(CONFIG, { gcs, slack }, new Date("2026-04-20T18:00:00Z"));
+
+  // 1 top-level + 2 thread replies (one per failing probe). No
+  // yellow-notes thread because all failing outcomes are RED.
+  expect(slack.posts).toHaveLength(3);
+  expect(slack.posts[0].threadTs).toBeUndefined();
+  expect(slack.posts[0].text).toContain("🔴 `v1/bad`");
+  expect(slack.posts[0].text).toContain("🔴 `v2/meh`");
+  expect(slack.posts[0].text).toContain("🟢 `v2/auto`");
+
+  // Both thread replies target the digest ts.
+  const threadTs = slack.posts[1].threadTs;
+  expect(threadTs).toBeDefined();
+  expect(slack.posts[2].threadTs).toBe(threadTs);
+
+  // Each thread reply names the probe it's breaking down.
+  const threadTexts = [slack.posts[1].text, slack.posts[2].text];
+  expect(threadTexts.some((t) => t.includes("`v1/bad`"))).toBe(true);
+  expect(threadTexts.some((t) => t.includes("`v2/meh`"))).toBe(true);
+});
