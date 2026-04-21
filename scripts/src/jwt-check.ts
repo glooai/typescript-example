@@ -2,7 +2,12 @@ import { config as loadEnv } from "dotenv";
 import jwt from "jsonwebtoken";
 import { loadCredentials, getAccessToken } from "./auth.js";
 
-const EXPECTED_ORG_ID = "00000000-0000-0000-0000-000000000000";
+// Org UUID the current credentials are expected to resolve to. Set via env
+// or edit locally when you need to verify a specific tenant — the default
+// here is a placeholder so this file doesn't bake a production identifier
+// into the repo.
+const EXPECTED_ORG_ID =
+  process.env.EXPECTED_ORG_ID ?? "00000000-0000-0000-0000-000000000000";
 
 type JwtPayload = {
   client_id?: string;

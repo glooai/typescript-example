@@ -61,10 +61,10 @@ export type CompletionsV2Response = {
 /**
  * Post a Completions V2 chat request.
  *
- * This is the minimal wrapper used by the a downstream app moderation reproducer. It
+ * This is the minimal wrapper used by the moderation reproducer. It
  * intentionally does not massage the request body — we want the raw payload
- * to match what downstream apps (e.g. a downstream app) are sending so the behavior we
- * observe here is apples-to-apples with the bug report.
+ * to match what downstream apps are sending so the behavior we observe here
+ * is apples-to-apples with the bug report.
  */
 export async function postCompletionsV2(
   accessToken: string,
@@ -89,9 +89,9 @@ export async function postCompletionsV2(
 /**
  * Heuristics for spotting overly-aggressive content moderation in the assistant
  * reply. These strings are taken from the actual refusal screenshot in the
- * a downstream app bug report. If the assistant *refuses* a benign homestead/tax question
- * citing drug-use or medical-harm safety, we flag the moderation as too
- * aggressive.
+ * external bug report. If the assistant *refuses* a benign homestead/tax
+ * question citing drug-use or medical-harm safety, we flag the moderation as
+ * too aggressive.
  */
 export const REFUSAL_PATTERNS: RegExp[] = [
   /i can(?:'|’)?t help with/i,

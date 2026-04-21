@@ -2,7 +2,9 @@ import { expect, it } from "vitest";
 import {
   buildRunPrefixes,
   collectYellowNotes,
+  countMix,
   formatDigestTopLevel,
+  formatProbeFailureThread,
   humanBytes,
   percentile,
   summarize,
@@ -133,4 +135,119 @@ it("formats the top-level digest post differently when all-green vs. red", () =>
   );
   const redPost = formatDigestTopLevel(redSummary);
   expect(redPost).toContain(":rotating_light:");
+});
+
+it("prefixes each per-probe bullet with 🔴/🟢 so failing probes are scannable", () => {
+  const summary = summarize(
+    [
+      makeArtifact([
+        makeOutcome({ signature: "v2/good" }),
+        makeOutcome({
+          signature: "v1/bad",
+          severity: "RED",
+          verdict: "FAIL",
+          httpStatus: 503,
+        }),
+      ]),
+    ],
+    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
+    NOW
+  );
+  const post = formatDigestTopLevel(summary);
+  // The passing probe renders green.
+  expect(post).toMatch(/• 🟢 `v2\/good` — 1\/1 pass/);
+  // The failing probe renders red even though the overall line already
+  // carries a severity counter — per-bullet emoji is the at-a-glance
+  // affordance we just added.
+  expect(post).toMatch(/• 🔴 `v1\/bad` — 0\/1 pass/);
+});
+
+it("summarize captures per-probe failure details for the threaded breakdown", () => {
+  const summary = summarize(
+    [
+      makeArtifact([
+        makeOutcome({ signature: "v1/llama", verdict: "PASS" }),
+        makeOutcome({
+          signature: "v1/llama",
+          verdict: "FAIL",
+          severity: "RED",
+          httpStatus: 503,
+          durationMs: 2643,
+          completedAt: 1745000000,
+        }),
+        makeOutcome({
+          signature: "v1/llama",
+          verdict: "FAIL",
+          severity: "RED",
+          httpStatus: 503,
+          durationMs: 2804,
+          completedAt: 1745010000,
+        }),
+      ]),
+    ],
+    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
+    NOW
+  );
+
+  const llama = summary.perProbe.find((p) => p.signature === "v1/llama");
+  expect(llama?.failing).toBe(2);
+  expect(llama?.failures).toHaveLength(2);
+  // Sorted oldest → newest so the "most recent" lookup in the thread
+  // reply can read the last element.
+  expect(llama?.failures[0].completedAt).toBe(1745000000);
+  expect(llama?.failures[1].completedAt).toBe(1745010000);
+  expect(llama?.failures.every((f) => f.httpStatus === 503)).toBe(true);
+});
+
+it("countMix produces a stable mostly-frequent-first tally", () => {
+  expect(countMix([])).toBe("");
+  expect(countMix(["FAIL"])).toBe("FAIL × 1");
+  expect(countMix(["FAIL", "FAIL", "SCHEMA_MISMATCH"])).toBe(
+    "FAIL × 2, SCHEMA_MISMATCH × 1"
+  );
+  // Alphabetical tiebreak when counts tie — keeps snapshot stability.
+  expect(countMix(["B", "A"])).toBe("A × 1, B × 1");
+});
+
+it("formatProbeFailureThread explains what N/M pass means for a red probe", () => {
+  const text = formatProbeFailureThread({
+    signature: "v1/llama3-70b",
+    label: "V1 · llama3-70b",
+    total: 8,
+    passing: 5,
+    failing: 3,
+    p50Ms: 2804,
+    p99Ms: 3576,
+    failures: [
+      {
+        verdict: "FAIL",
+        httpStatus: 503,
+        durationMs: 2643,
+        completedAt: 1745000000,
+      },
+      {
+        verdict: "FAIL",
+        httpStatus: 503,
+        durationMs: 2700,
+        completedAt: 1745010000,
+      },
+      {
+        verdict: "FAIL",
+        httpStatus: null,
+        durationMs: 2800,
+        completedAt: 1745020000,
+      },
+    ],
+  });
+
+  expect(text).toContain("*Breakdown for `v1/llama3-70b`*");
+  expect(text).toContain("Runs in the 24h window: 8");
+  expect(text).toContain("Passed: 5 · Failed: 3");
+  expect(text).toContain("FAIL × 3");
+  // Mix combines 503 (×2) and network error (×1).
+  expect(text).toContain("503 × 2");
+  expect(text).toContain("network error × 1");
+  // Most recent is the last element after sort.
+  expect(text).toContain(new Date(1745020000 * 1000).toISOString());
+  expect(text).toContain("p50 2804ms");
 });
