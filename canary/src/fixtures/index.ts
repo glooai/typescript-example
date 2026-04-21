@@ -2,14 +2,26 @@
  * Probe fixtures — the surface area we're fuzzing. Each fixture becomes one
  * Probe instance. Extend this file (not the runner) to add coverage.
  *
- * Source for supported V2 model IDs:
- *   .context/guides/gloo/api/supported-models.md
+ * Source of truth for V2 model IDs: the live, unauthenticated endpoint
+ *   GET https://platform.ai.gloo.com/platform/v2/models
  *
- * Coverage goals:
- *   - Every V1 model we still officially support (+ one known-deprecated
- *     canary for when Gloo removes a V1 alias).
- *   - Every V2 direct-model alias, one probe per alias.
- *   - Every V2 model_family routing mode (auto_routing + 4 families).
+ * That's the same data feed the public supported-models docs page renders
+ * from (see `TangoGroup/gloo#2049` — Mintlify was switched to pull from
+ * this endpoint dynamically so docs can't drift from the platform registry
+ * again).
+ *
+ * Scope:
+ *   - V2 Completions is the actively supported surface. We probe every
+ *     direct-model alias in the authoritative list + every routing mode
+ *     (auto_routing + 4 model_family values).
+ *   - V1 Messages is deprecated and maintained for backwards-compat only.
+ *     Per Gloo platform team (2026-04-21 triage thread, CC Elio Kazu
+ *     Mostero + Jackson Southern): V1 has no cross-provider retry chain
+ *     and individual models like `Llama 3 70B Instruct` are explicitly
+ *     labeled deprecated in `ai-api`. We deliberately do NOT probe V1 —
+ *     every failure would be a design-expected flake, not a platform
+ *     outage signal. If a caller needs reliability, they should migrate
+ *     to V2.
  */
 
 import type { V1MessagesFixture } from "../probes/v1-messages.js";
@@ -22,27 +34,24 @@ import type { V2CompletionsFixture } from "../probes/v2-completions.js";
 const BENIGN_PROMPT =
   "In one sentence, what are three best practices for clear technical writing?";
 
-export const V1_FIXTURES: V1MessagesFixture[] = [
-  {
-    signature: "v1/llama3-70b",
-    label: "V1 Messages · meta.llama3-70b-instruct",
-    model: "meta.llama3-70b-instruct-v1:0",
-    prompt: BENIGN_PROMPT,
-    benign: true,
-  },
-  {
-    signature: "v1/sonnet-4-deprecated",
-    label: "V1 Messages · Sonnet 4 (deprecated; will retire 2026-06-15)",
-    model: "us.anthropic.claude-sonnet-4-20250514-v1:0",
-    prompt: BENIGN_PROMPT,
-    benign: true,
-  },
-];
+/**
+ * V1 Messages probes are intentionally empty. V1 is deprecated by design
+ * and probing it generates red-herring RED alerts for expected-flaky
+ * provider-side behavior. Kept as an empty export so the runner wiring
+ * stays stable if we ever decide to add a targeted V1 probe back (for
+ * example, a dedicated "confirm V1 returns 'model not supported' after a
+ * retirement date" alarm that only alerts on the specific retirement
+ * verdict, not on transient 503s).
+ */
+export const V1_FIXTURES: V1MessagesFixture[] = [];
 
-// Supported V2 direct-model aliases per
-// .context/guides/gloo/api/supported-models.md.
-// Order: anthropic → google → openai → open-source so the Slack digest is
-// easy to scan.
+/**
+ * Every currently-supported V2 direct-model alias per the authoritative
+ * endpoint. Ordered alphabetically within family (Anthropic, Google,
+ * Open Source, OpenAI) so the Slack digest stays scannable. Keep this
+ * list in lockstep with `/platform/v2/models`; if Gloo adds or removes a
+ * model, update here in the same PR that touches the platform.
+ */
 const V2_DIRECT_MODELS: Array<{
   signature: string;
   model: string;
@@ -55,63 +64,47 @@ const V2_DIRECT_MODELS: Array<{
     label: "V2 · Claude Haiku 4.5",
   },
   {
+    signature: "v2/model/anthropic-opus-4.5",
+    model: "gloo-anthropic-claude-opus-4.5",
+    label: "V2 · Claude Opus 4.5",
+  },
+  {
+    signature: "v2/model/anthropic-opus-4.6",
+    model: "gloo-anthropic-claude-opus-4.6",
+    label: "V2 · Claude Opus 4.6",
+  },
+  {
+    signature: "v2/model/anthropic-sonnet-4",
+    model: "gloo-anthropic-claude-sonnet-4",
+    label: "V2 · Claude Sonnet 4",
+  },
+  {
     signature: "v2/model/anthropic-sonnet-4.5",
     model: "gloo-anthropic-claude-sonnet-4.5",
     label: "V2 · Claude Sonnet 4.5",
   },
   {
-    signature: "v2/model/anthropic-opus-4.5",
-    model: "gloo-anthropic-claude-opus-4.5",
-    label: "V2 · Claude Opus 4.5",
+    signature: "v2/model/anthropic-sonnet-4.6",
+    model: "gloo-anthropic-claude-sonnet-4.6",
+    label: "V2 · Claude Sonnet 4.6",
   },
   // Google
-  {
-    signature: "v2/model/google-gemini-2.5-flash-lite",
-    model: "gloo-google-gemini-2.5-flash-lite",
-    label: "V2 · Gemini 2.5 Flash Lite",
-  },
   {
     signature: "v2/model/google-gemini-2.5-flash",
     model: "gloo-google-gemini-2.5-flash",
     label: "V2 · Gemini 2.5 Flash",
   },
   {
+    signature: "v2/model/google-gemini-2.5-flash-lite",
+    model: "gloo-google-gemini-2.5-flash-lite",
+    label: "V2 · Gemini 2.5 Flash Lite",
+  },
+  {
     signature: "v2/model/google-gemini-2.5-pro",
     model: "gloo-google-gemini-2.5-pro",
     label: "V2 · Gemini 2.5 Pro",
   },
-  {
-    signature: "v2/model/google-gemini-3-pro-preview",
-    model: "gloo-google-gemini-3-pro-preview",
-    label: "V2 · Gemini 3 Pro (preview)",
-  },
-  // OpenAI
-  {
-    signature: "v2/model/openai-gpt-5-nano",
-    model: "gloo-openai-gpt-5-nano",
-    label: "V2 · GPT-5 Nano",
-  },
-  {
-    signature: "v2/model/openai-gpt-5-mini",
-    model: "gloo-openai-gpt-5-mini",
-    label: "V2 · GPT-5 Mini",
-  },
-  {
-    signature: "v2/model/openai-gpt-5-pro",
-    model: "gloo-openai-gpt-5-pro",
-    label: "V2 · GPT-5 Pro",
-  },
-  {
-    signature: "v2/model/openai-gpt-5.2",
-    model: "gloo-openai-gpt-5.2",
-    label: "V2 · GPT-5.2",
-  },
   // Open source
-  {
-    signature: "v2/model/oss-llama-3.1-8b",
-    model: "gloo-meta-llama-3.1-8b-instruct",
-    label: "V2 · Llama 3.1 8B Instruct",
-  },
   {
     signature: "v2/model/oss-deepseek-v3.1",
     model: "gloo-deepseek-chat-v3.1",
@@ -123,13 +116,64 @@ const V2_DIRECT_MODELS: Array<{
     label: "V2 · DeepSeek V3.2",
   },
   {
+    signature: "v2/model/oss-deepseek-r1",
+    model: "gloo-deepseek-r1",
+    label: "V2 · DeepSeek R1",
+  },
+  {
     signature: "v2/model/oss-gpt-oss-120b",
     model: "gloo-openai-gpt-oss-120b",
     label: "V2 · GPT OSS 120B",
   },
+  {
+    signature: "v2/model/oss-llama-3.1-8b",
+    model: "gloo-meta-llama-3.1-8b-instruct",
+    label: "V2 · Llama 3.1 8B Instruct",
+  },
+  {
+    signature: "v2/model/oss-llama-4-maverick",
+    model: "gloo-meta-llama-4-maverick",
+    label: "V2 · Llama 4 Maverick",
+  },
+  // OpenAI
+  {
+    signature: "v2/model/openai-gpt-4.1",
+    model: "gloo-openai-gpt-4.1",
+    label: "V2 · GPT-4.1",
+  },
+  {
+    signature: "v2/model/openai-gpt-4.1-mini",
+    model: "gloo-openai-gpt-4.1-mini",
+    label: "V2 · GPT-4.1 Mini",
+  },
+  {
+    signature: "v2/model/openai-gpt-5-mini",
+    model: "gloo-openai-gpt-5-mini",
+    label: "V2 · GPT-5 Mini",
+  },
+  {
+    signature: "v2/model/openai-gpt-5-nano",
+    model: "gloo-openai-gpt-5-nano",
+    label: "V2 · GPT-5 Nano",
+  },
+  {
+    signature: "v2/model/openai-gpt-5.2",
+    model: "gloo-openai-gpt-5.2",
+    label: "V2 · GPT-5.2",
+  },
+  {
+    signature: "v2/model/openai-gpt-5.2-pro",
+    model: "gloo-openai-gpt-5.2-pro",
+    label: "V2 · GPT-5.2 Pro",
+  },
+  {
+    signature: "v2/model/openai-gpt-5.4",
+    model: "gloo-openai-gpt-5.4",
+    label: "V2 · GPT-5.4",
+  },
 ];
 
-// Some models (GPT-5 Pro, Opus 4.5, DeepSeek V3.2 with reasoning) can run
+// Some models (GPT-5.2 Pro, Opus 4.6, DeepSeek R1 with reasoning) can run
 // longer than the default 90s — give every direct-model probe 120s so the
 // per-probe timeout isn't the bottleneck. Probes still run sequentially so
 // the whole batch completes well under the 600s job timeout.
