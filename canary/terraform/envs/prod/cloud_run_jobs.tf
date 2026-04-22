@@ -10,6 +10,12 @@ locals {
       name  = "CANARY_RESULTS_BUCKET"
       value = google_storage_bucket.canary_results.name
     },
+    {
+      # Consumed by runners/tier-decision.ts. Controls the
+      # Light→Full escalation cadence in the healthy steady state.
+      name  = "CANARY_FULL_SWEEP_INTERVAL_MS"
+      value = tostring(var.full_sweep_interval_ms)
+    },
   ]
   shared_secrets = [
     {

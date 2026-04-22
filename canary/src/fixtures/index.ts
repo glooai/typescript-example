@@ -46,6 +46,28 @@ const BENIGN_PROMPT =
 // the whole batch completes well under the 600s job timeout.
 const V2_DIRECT_PROBE_TIMEOUT_MS = 120_000;
 
+// Cap full-sweep probe responses at ~48 tokens (comfortably fits the
+// benign reply plus any refusal prefix the detector needs to match)
+// — the router + model-selection + safety layer all execute even with
+// a short cap, so coverage is preserved while inference spend drops
+// materially. See `.context/guides/gloo/api/completions-v2.md` for
+// the `max_tokens` contract.
+const V2_FULL_PROBE_MAX_TOKENS = 48;
+
+// Pulse-probe prompt — the single probe we fire in the "light" tier
+// every 15 min. Minimizes input token budget while still exercising
+// auth → router → completion. The benign-prompt reuse would also
+// work, but a single-word prompt keeps input billed-weight as low as
+// it can go without drifting from realistic usage.
+const LIGHT_PULSE_PROMPT = "ping";
+
+// Light-tier cap. The pulse probe doesn't depend on content inspection
+// (any 2xx with non-empty `choices[0].message.content` counts as PASS
+// — benign:false turns off the refusal detector so we can't
+// false-positive a truncated reply). Keep this as small as the
+// refusal detector + schema validator both tolerate.
+const V2_LIGHT_PROBE_MAX_TOKENS = 4;
+
 /**
  * V1 Messages probes are intentionally empty. V1 is deprecated by design
  * and probing it generates red-herring RED alerts for expected-flaky
@@ -74,6 +96,7 @@ export const V2_ROUTING_FIXTURES: V2CompletionsFixture[] = [
     label: "V2 · auto_routing",
     prompt: BENIGN_PROMPT,
     benign: true,
+    maxTokens: V2_FULL_PROBE_MAX_TOKENS,
     routing: { kind: "auto_routing" },
   },
   {
@@ -81,6 +104,7 @@ export const V2_ROUTING_FIXTURES: V2CompletionsFixture[] = [
     label: "V2 · model_family=Anthropic",
     prompt: BENIGN_PROMPT,
     benign: true,
+    maxTokens: V2_FULL_PROBE_MAX_TOKENS,
     routing: { kind: "model_family", family: "Anthropic" },
   },
   {
@@ -88,6 +112,7 @@ export const V2_ROUTING_FIXTURES: V2CompletionsFixture[] = [
     label: "V2 · model_family=OpenAI",
     prompt: BENIGN_PROMPT,
     benign: true,
+    maxTokens: V2_FULL_PROBE_MAX_TOKENS,
     routing: { kind: "model_family", family: "OpenAI" },
   },
   {
@@ -95,6 +120,7 @@ export const V2_ROUTING_FIXTURES: V2CompletionsFixture[] = [
     label: "V2 · model_family=Google",
     prompt: BENIGN_PROMPT,
     benign: true,
+    maxTokens: V2_FULL_PROBE_MAX_TOKENS,
     routing: { kind: "model_family", family: "Google" },
   },
   {
@@ -102,9 +128,40 @@ export const V2_ROUTING_FIXTURES: V2CompletionsFixture[] = [
     label: "V2 · model_family=Open Source",
     prompt: BENIGN_PROMPT,
     benign: true,
+    maxTokens: V2_FULL_PROBE_MAX_TOKENS,
     routing: { kind: "model_family", family: "Open Source" },
   },
 ];
+
+/**
+ * Light-tier "pulse" fixture. Exactly one probe, fired on the every-15-min
+ * schedule when no failures are active and a full sweep has happened
+ * recently. Exercises the full production path (OAuth → router →
+ * completion) with the minimum possible request + response weight so
+ * steady-state inference spend is measured in single-digit tokens per
+ * run.
+ *
+ * Detection semantics:
+ *  - Platform-wide outage (OAuth down, router down, all providers down)
+ *    → light probe fails → next scheduled run escalates to Full tier
+ *    within 15 min. Well under the 1h awareness target.
+ *  - Single-model or single-family outage → NOT caught here (router
+ *    dodges unhealthy backends). Covered by the periodic Full sweep
+ *    (see `CANARY_FULL_SWEEP_INTERVAL_MS`, default 1h).
+ *
+ * `benign: false` turns off the refusal detector — a 4-token response
+ * can't reasonably be inspected for refusal patterns without false
+ * positives, and any non-empty 2xx already proves the full completion
+ * path worked. Schema validation + empty-content check still apply.
+ */
+export const V2_LIGHT_PULSE_FIXTURE: V2CompletionsFixture = {
+  signature: "v2/light/auto_routing",
+  label: "V2 · light pulse · auto_routing",
+  prompt: LIGHT_PULSE_PROMPT,
+  benign: false,
+  maxTokens: V2_LIGHT_PROBE_MAX_TOKENS,
+  routing: { kind: "auto_routing" },
+};
 
 /**
  * Build one direct-model fixture per entry in a V2 models response.
@@ -128,6 +185,7 @@ export function buildV2DirectModelFixtures(
         prompt: BENIGN_PROMPT,
         benign: true,
         timeoutMs: V2_DIRECT_PROBE_TIMEOUT_MS,
+        maxTokens: V2_FULL_PROBE_MAX_TOKENS,
         routing: { kind: "model", model: model.id },
       })
     );
@@ -162,7 +220,8 @@ export async function buildV2Fixtures(
  */
 export function currentProbeSignatures(modelIds: string[]): string[] {
   const v1 = V1_FIXTURES.map((f) => f.signature);
+  const light = [V2_LIGHT_PULSE_FIXTURE.signature];
   const routing = V2_ROUTING_FIXTURES.map((f) => f.signature);
   const direct = modelIds.map((id) => `v2/model/${id}`);
-  return [...v1, ...routing, ...direct];
+  return [...v1, ...light, ...routing, ...direct];
 }

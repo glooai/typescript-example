@@ -56,3 +56,17 @@ variable "schedule_timezone" {
   type        = string
   default     = "America/Chicago"
 }
+
+variable "full_sweep_interval_ms" {
+  description = <<-EOT
+    How long a Full tier sweep stays "fresh" before the probe runner
+    demands another one regardless of health. Bounds per-model outage
+    detection latency in the steady-state (all-green) case.
+    Set to 3600000 (1h) to keep alignment with the "aware within the
+    hour of downtime" requirement. Raise to trade detection latency
+    for inference-budget headroom; lower to tighten coverage when
+    budget allows.
+  EOT
+  type        = number
+  default     = 3600000 # 1 hour
+}

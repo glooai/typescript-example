@@ -1,37 +1,47 @@
 # Gloo AI Canary
 
 Scheduled integration tests that exercise the Gloo AI platform from
-outside. Probes run on a business-hours-biased schedule — every 15
-minutes from 6am–5pm Central, then hourly from 5pm–6am Central (57
-runs/day total). Every run archives raw results to Google Cloud
-Storage and alerts Slack on any RED-level regression. A separate
-digest job posts a once-a-day aggregate of the last 24h.
+outside. Cloud Scheduler fires every 15 min during daytime / hourly
+at night (57 runs/day), but the work done on each firing is **adaptive**
+— a cheap "light" pulse when the platform is healthy, a full fan-out
+sweep when anything is failing or the last full sweep is stale. Every
+run archives raw results to Google Cloud Storage and alerts Slack on
+any RED-level regression. A separate digest job posts a once-a-day
+aggregate of the last 24h.
 
 Purpose: proactively detect changes to the Gloo AI API — schema drift,
 model-alias breakage, routing regressions, or safety-layer over-moderation
 — regardless of whether they're announced in release notes.
 
+## Adaptive tiering (inference-budget aware)
+
+Each firing runs in one of two tiers, selected by `src/runners/tier-decision.ts`:
+
+| Tier      | What runs                                                  | When                                                                                                     | Requests / tick |
+| --------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | --------------- |
+| **Light** | 1 `auto_routing` pulse probe, `max_tokens: 4`              | Steady-state: no active failures AND last Full sweep within `CANARY_FULL_SWEEP_INTERVAL_MS` (default 1h) | 1               |
+| **Full**  | All routing-mode + direct-model fixtures, `max_tokens: 48` | Cold start · any active failure · periodic refresh (≥1h since last Full)                                 | ~22             |
+
+Detection windows:
+
+- **Platform-wide outage** (OAuth, router, all providers) → caught by the light pulse on the next tick (≤15 min daytime, ≤1h nighttime).
+- **Single-model or single-family outage** → caught by the next periodic Full sweep (≤1h). Auto-recovers the tier cascade back to Light once the failure clears.
+
+Tunable via `CANARY_FULL_SWEEP_INTERVAL_MS` on the Cloud Run Job — no code change needed to dial the per-model coverage window tighter or looser.
+
 ## What it probes
 
 Fixture-driven in `src/fixtures/index.ts` — add new cases there, no code changes needed elsewhere.
 
-**V1 Messages** (`/ai/v1/chat/completions`) — 2 fixtures:
+**V1 Messages** (`/ai/v1/chat/completions`) — 0 fixtures (V1 is deprecated; the runner wiring is kept intact for a targeted retirement-date alarm if we decide to add one back).
 
-- `meta.llama3-70b-instruct-v1:0`
-- `us.anthropic.claude-sonnet-4-20250514-v1:0` (deprecated; canary for when Gloo removes the V1 alias on / before 2026-06-15)
+**V2 Completions** (`/ai/v2/chat/completions`):
 
-**V2 Completions** (`/ai/v2/chat/completions`) — 20 fixtures:
+- **Light pulse (1)**: `v2/light/auto_routing`, single-word prompt, `max_tokens: 4`. Runs on every "light" tick.
+- **Routing-mode (5)** — `auto_routing: true` + `model_family` in `{Anthropic, OpenAI, Google, Open Source}`. `max_tokens: 48`.
+- **Direct-model (~15)** — one per live alias from `/platform/v2/models`. Hydrated at run time so the probe list can never drift from the authoritative registry. `max_tokens: 48` each.
 
-- Routing-mode probes (5):
-  - `auto_routing: true`
-  - `model_family: anthropic | openai | google | open-source`
-- Direct-model probes (15) — one per supported alias from `.context/guides/gloo/api/supported-models.md`:
-  - **Anthropic:** Haiku 4.5, Sonnet 4.5, Opus 4.5
-  - **Google:** Gemini 2.5 Flash Lite, Flash, Pro · Gemini 3 Pro preview
-  - **OpenAI:** GPT-5 Nano, Mini, Pro · GPT-5.2
-  - **Open source:** Llama 3.1 8B · DeepSeek V3.1 · DeepSeek V3.2 · GPT OSS 120B
-
-Total: **22 probe executions** per scheduled run (57×/day → 1,254 executions/day).
+Full sweep total: **~21 probe executions**. Inference spend scales with the tier ratio — a fully-healthy day runs mostly Light ticks and a handful of Full sweeps, dropping request volume by roughly an order of magnitude vs. a firing-every-tick-at-full-coverage policy.
 
 Every probe uses a benign technical-writing prompt and asserts the response:
 
@@ -43,14 +53,16 @@ Every probe uses a benign technical-writing prompt and asserts the response:
 ## Architecture
 
 ```
-┌─ Cloud Scheduler (cron) ─────┐     ┌─ Cloud Run Job ──┐
-│ */15 06:00–16:45 CT (44/day) │ ──> │ canary-probe     │ ──> GCS: runs/YYYY/MM/DD/HH-*.json
-│ hourly 17:00–05:00 CT (13)   │ ──> │ canary-probe     │
-│ daily @ 06:05 CT             │ ──> │ canary-digest    │ ──> Slack: daily digest + failure alerts
-└──────────────────────────────┘     └──────────────────┘
+┌─ Cloud Scheduler (cron) ─────┐     ┌─ Cloud Run Job ──────────────┐
+│ */15 06:00–16:45 CT (44/day) │ ──> │ canary-probe                 │ ──> GCS: runs/YYYY/MM/DD/HH-*.json
+│ hourly 17:00–05:00 CT (13)   │ ──> │  └─ tier-decision ──┐        │
+│ daily @ 06:05 CT             │ ──> │      light: 1 probe │        │ ──> Slack: failure alerts
+│                              │     │      full: ~21      │        │
+│                              │ ──> │ canary-digest                │ ──> Slack: daily 24h digest
+└──────────────────────────────┘     └──────────────────────────────┘
          │                                │
          │                                ├─ Secret Manager ─> Gloo credentials, Slack bot token
-         │                                └─ GCS state ──────> active-failures.json (dedup)
+         │                                └─ GCS state ──────> active-failures.json + probe-tier.json
 ```
 
 One Docker image, two entry points selected by `CANARY_MODE`
