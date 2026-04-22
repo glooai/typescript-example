@@ -8,6 +8,7 @@
 
 import { Storage } from "@google-cloud/storage";
 import { gzipSync, gunzipSync } from "node:zlib";
+import type { ModelRegistryDelta } from "../fixtures/model-registry-delta.js";
 import type { ProbeOutcome } from "../probes/types.js";
 
 export type RunArtifact = {
@@ -15,6 +16,14 @@ export type RunArtifact = {
   startedAt: string;
   completedAt: string;
   outcomes: ProbeOutcome[];
+  /**
+   * Diff of the live V2 model registry against the previous archived
+   * snapshot. Present on runs where we successfully fetched the live
+   * registry AND the DB-backed snapshot store was reachable; omitted
+   * when the snapshot step was skipped (no DB URL / DB unreachable) so
+   * digests can distinguish "no changes" from "diff not available."
+   */
+  registryDelta?: ModelRegistryDelta;
 };
 
 export type ActiveFailures = {

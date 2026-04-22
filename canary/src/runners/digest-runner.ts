@@ -23,6 +23,7 @@
  */
 
 import type { CanaryConfig } from "../config.js";
+import type { ModelRegistryDelta } from "../fixtures/model-registry-delta.js";
 import type { GcsClient, RunArtifact } from "../sinks/gcs.js";
 import type { SlackClient } from "../sinks/slack.js";
 import type { Severity, Verdict } from "../probes/types.js";
@@ -90,6 +91,14 @@ export type DigestSummary = {
   severityCounts: Record<Severity, number>;
   verdictCounts: Record<Verdict, number>;
   perProbe: PerProbeEntry[];
+  /**
+   * Most recent registry-delta event in the window, if any. We only
+   * surface the latest change rather than every intermediate diff — if
+   * the registry toggled mid-window (e.g. a model was removed and
+   * re-added) the latest snapshot is the one that actually matters for
+   * the reader's current mental model of what's callable.
+   */
+  latestRegistryDelta: ModelRegistryDelta | null;
   archival: {
     objectCount: number;
     oldestAgeDays: number | null;
@@ -192,7 +201,16 @@ export function summarize(
   };
 
   let probesRun = 0;
+  // Count registry additions/removals toward the YELLOW severity counter so
+  // the top-level `🔴 N 🟡 N 🟢 N` summary reflects registry events as
+  // yellow-severity signals. Registry changes are "something shifted, not
+  // necessarily broken" — exactly what YELLOW means in this schema. Red is
+  // reserved for probes that target a currently-supported model and fail.
   for (const artifact of artifacts) {
+    const delta = artifact.registryDelta;
+    if (delta && delta.hasChanges) {
+      severityCounts.YELLOW += delta.added.length + delta.removed.length;
+    }
     for (const outcome of artifact.outcomes) {
       probesRun++;
       severityCounts[outcome.severity]++;
@@ -259,8 +277,27 @@ export function summarize(
     severityCounts,
     verdictCounts,
     perProbe,
+    latestRegistryDelta: pickLatestRegistryDelta(artifacts),
     archival,
   };
+}
+
+/**
+ * Walk `artifacts` newest-last and return the most recent registry
+ * delta that is either a first snapshot or has add/remove changes. We
+ * ignore deltas with `hasChanges=false && isFirstSnapshot=false` because
+ * those are the steady-state "no change" case and would never be
+ * rendered — returning null for that case keeps the digest post quieter
+ * when nothing interesting happened to the registry in the window.
+ */
+export function pickLatestRegistryDelta(
+  artifacts: RunArtifact[]
+): ModelRegistryDelta | null {
+  for (let i = artifacts.length - 1; i >= 0; i--) {
+    const d = artifacts[i].registryDelta;
+    if (d && (d.hasChanges || d.isFirstSnapshot)) return d;
+  }
+  return null;
 }
 
 export function percentile(values: number[], p: number): number {
@@ -407,17 +444,69 @@ export function formatDigestTopLevel(summary: DigestSummary): string {
   const archival = summary.archival;
   const archivalLine = `• Archive: ${archival.objectCount} objects, ${humanBytes(archival.totalBytes)}, oldest ${archival.oldestAgeDays ?? "?"}d (auto-pruned @ 90d)`;
 
+  // Registry-change block appears BEFORE "Needs attention" when present —
+  // adds/removes are a higher-signal event than routine probe failures.
+  // When the registry is steady-state we omit the block entirely rather
+  // than render "no changes" noise.
+  const registryBlock = summary.latestRegistryDelta
+    ? formatRegistryDeltaBlock(summary.latestRegistryDelta) + "\n\n"
+    : "";
+
   return [
     header,
     `*Window:* ${summary.windowStart} → ${summary.windowEnd}`,
     `*Probes run:* ${total} across ${summary.runsFound} runs`,
     `*Severity:* 🔴 ${summary.severityCounts.RED}  🟡 ${summary.severityCounts.YELLOW}  🟢 ${summary.severityCounts.GREEN}`,
     "",
-    "*Needs attention*",
+    registryBlock + "*Needs attention*",
     notableBlock + greenRollup,
     "",
     archivalLine,
   ].join("\n");
+}
+
+/**
+ * Renders the "/platform/v2/models registry changed" block in the
+ * top-level digest post. Two modes:
+ *
+ *   1. First snapshot ever — subdued "baseline captured" note so the
+ *      first ever deploy doesn't scream "something changed!" when in
+ *      fact nothing has; it's the first measurement.
+ *   2. Subsequent runs with adds/removes — rotating-light emphasized
+ *      block listing every added and every removed id, plus the two
+ *      snapshot timestamps so a reader can see the change window.
+ */
+export function formatRegistryDeltaBlock(delta: ModelRegistryDelta): string {
+  if (delta.isFirstSnapshot) {
+    const count = delta.added.length;
+    return [
+      `:memo: *Model registry baseline captured (${count} ${count === 1 ? "model" : "models"})*`,
+      `_Future digests will emphasize any additions or removals from \`/platform/v2/models\`._`,
+    ].join("\n");
+  }
+
+  // YELLOW-flavored emoji: registry adds/removes are "something shifted,
+  // not broken" — not a RED alert. RED is reserved for probes targeting
+  // currently-supported models that actually fail.
+  const lines: string[] = [
+    `:large_yellow_circle: *\`/platform/v2/models\` changed since last snapshot*`,
+  ];
+  if (delta.added.length > 0) {
+    const bullets = delta.added.map((id) => `  • \`${id}\``).join("\n");
+    lines.push(
+      `• :heavy_plus_sign: *Added (${delta.added.length}):*\n${bullets}`
+    );
+  }
+  if (delta.removed.length > 0) {
+    const bullets = delta.removed.map((id) => `  • \`${id}\``).join("\n");
+    lines.push(
+      `• :heavy_minus_sign: *Removed (${delta.removed.length}):*\n${bullets}`
+    );
+  }
+  lines.push(
+    `_Previous snapshot: ${delta.previousCapturedAt} · current: ${delta.currentCapturedAt}._`
+  );
+  return lines.join("\n");
 }
 
 /**
