@@ -150,3 +150,19 @@ export async function buildV2Fixtures(
   const models = await loadModels();
   return [...V2_ROUTING_FIXTURES, ...buildV2DirectModelFixtures(models)];
 }
+
+/**
+ * Signatures the canary is *currently* intended to probe given a list of
+ * live model ids. Includes V1 (currently empty), routing-mode (5 static),
+ * and one `v2/model/<id>` per live model. The digest uses this to filter
+ * archived outcomes for signatures that are no longer in the probe set —
+ * e.g., retired-from-registry aliases whose old runs still sit in the
+ * 24h window. One definition, one call site, no drift between the probe
+ * build path and the digest filter path.
+ */
+export function currentProbeSignatures(modelIds: string[]): string[] {
+  const v1 = V1_FIXTURES.map((f) => f.signature);
+  const routing = V2_ROUTING_FIXTURES.map((f) => f.signature);
+  const direct = modelIds.map((id) => `v2/model/${id}`);
+  return [...v1, ...routing, ...direct];
+}

@@ -6,6 +6,7 @@ import {
   formatDigestTopLevel,
   formatProbeFailureThread,
   formatProbeYellowThread,
+  formatRegistryDeltaBlock,
   humanBytes,
   percentile,
   summarize,
@@ -405,4 +406,80 @@ it("formatProbeYellowThread surfaces the soft-signal breakdown for a yellow prob
   expect(text).toContain(new Date(1745010000 * 1000).toISOString());
   expect(text).toContain("p50 4000ms");
   expect(text).toContain("soft signal");
+});
+
+it("summarize filters outcomes whose signature is not in allowedSignatures", () => {
+  const artifact = makeArtifact([
+    // In the current probe set — must count.
+    makeOutcome({ signature: "v2/model/gloo-a", durationMs: 100 }),
+    // Retired from the current probe set — must be dropped entirely.
+    makeOutcome({
+      signature: "v2/model/gloo-retired",
+      verdict: "FAIL",
+      severity: "RED",
+      httpStatus: 400,
+      durationMs: 400,
+    }),
+    // V1 — also retired; not currently probed. Must be dropped.
+    makeOutcome({
+      signature: "v1/llama3-70b",
+      verdict: "FAIL",
+      severity: "RED",
+      httpStatus: 503,
+      durationMs: 500,
+    }),
+  ]);
+
+  const summary = summarize(
+    [artifact],
+    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
+    NOW,
+    { allowedSignatures: new Set(["v2/model/gloo-a"]) }
+  );
+
+  // Only the one allowed outcome contributes.
+  expect(summary.probesRun).toBe(1);
+  expect(summary.severityCounts.GREEN).toBe(1);
+  expect(summary.severityCounts.RED).toBe(0);
+  expect(summary.perProbe.map((p) => p.signature)).toEqual([
+    "v2/model/gloo-a",
+  ]);
+});
+
+it("summarize leaves all outcomes in place when allowedSignatures is null (fail-open)", () => {
+  const artifact = makeArtifact([
+    makeOutcome({ signature: "v2/model/gloo-a" }),
+    makeOutcome({
+      signature: "v2/model/gloo-retired",
+      severity: "RED",
+      verdict: "FAIL",
+    }),
+  ]);
+  const summary = summarize(
+    [artifact],
+    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
+    NOW,
+    { allowedSignatures: null }
+  );
+  expect(summary.probesRun).toBe(2);
+  expect(summary.severityCounts.RED).toBe(1);
+});
+
+it("formatRegistryDeltaBlock renders one bullet per add/remove on its own line (compact)", () => {
+  const text = formatRegistryDeltaBlock({
+    previousCapturedAt: "2026-04-19T00:00:00.000Z",
+    currentCapturedAt: "2026-04-22T12:00:00.000Z",
+    added: ["gloo-new-1", "gloo-new-2"],
+    removed: ["gloo-gone"],
+    isFirstSnapshot: false,
+    hasChanges: true,
+  });
+  // Each add/remove on its own line, icon + id on the same line.
+  expect(text).toMatch(/• :heavy_plus_sign: `gloo-new-1`/);
+  expect(text).toMatch(/• :heavy_plus_sign: `gloo-new-2`/);
+  expect(text).toMatch(/• :heavy_minus_sign: `gloo-gone`/);
+  // No nested bullet indentation, no "(count)" heading lines — those
+  // were the verbose shape we just replaced.
+  expect(text).not.toMatch(/Added \(\d/);
+  expect(text).not.toMatch(/Removed \(\d/);
 });

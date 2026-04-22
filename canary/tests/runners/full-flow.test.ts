@@ -618,6 +618,127 @@ it("runDigest renders the registry delta as a YELLOW-flavored block in the top-l
   expect(summary.severityCounts.YELLOW).toBe(2);
 });
 
+it("runDigest filters outcomes against the current snapshot — retired signatures drop from the digest", async () => {
+  const artifact: RunArtifact = {
+    runId: "mixed",
+    startedAt: "2026-04-20T06:00:00Z",
+    completedAt: "2026-04-20T06:00:30Z",
+    outcomes: [
+      // A currently-probed model that passed.
+      {
+        signature: "v2/model/gloo-a",
+        label: "V2 · A",
+        endpoint: "u",
+        apiVersion: "v2",
+        httpStatus: 200,
+        verdict: "PASS",
+        severity: "GREEN",
+        durationMs: 1000,
+        details: {},
+        completedAt: 1700000000,
+      },
+      // A retired-from-registry model that failed in a pre-deploy run —
+      // should NOT contribute to "Needs attention" because it isn't in
+      // the current probe set.
+      {
+        signature: "v2/model/gloo-retired",
+        label: "V2 · Retired",
+        endpoint: "u",
+        apiVersion: "v2",
+        httpStatus: 400,
+        verdict: "FAIL",
+        severity: "RED",
+        durationMs: 400,
+        details: {},
+        completedAt: 1700000100,
+      },
+      // A V1 probe that's no longer in our fixture set.
+      {
+        signature: "v1/llama3-70b",
+        label: "V1 · llama3-70b",
+        endpoint: "u",
+        apiVersion: "v1",
+        httpStatus: 503,
+        verdict: "FAIL",
+        severity: "RED",
+        durationMs: 500,
+        details: {},
+        completedAt: 1700000200,
+      },
+    ],
+  };
+
+  const gcs = fakeGcs({
+    files: {
+      "runs/2026/04/20/06-mixed.json": artifact,
+      // Snapshot lists only gloo-a — so gloo-retired and v1/llama3-70b
+      // should both drop out of the digest.
+      "state/model-registry-snapshot.json": {
+        capturedAt: "2026-04-20T06:30:00Z",
+        runId: "some-run",
+        modelIds: ["gloo-a"],
+      },
+    },
+    list: ["runs/2026/04/20/06-mixed.json"],
+  });
+  const slack = fakeSlack();
+
+  const summary = await runDigest(
+    CONFIG,
+    { gcs, slack },
+    new Date("2026-04-20T18:00:00Z")
+  );
+
+  // Retired signatures are filtered out before aggregation.
+  expect(summary.probesRun).toBe(1);
+  expect(summary.severityCounts.RED).toBe(0);
+  expect(summary.perProbe.map((p) => p.signature)).toEqual(["v2/model/gloo-a"]);
+
+  // And the top-level digest post correctly reads "all green" rather
+  // than surfacing the retired signatures in "Needs attention".
+  expect(slack.posts[0].text).not.toContain("gloo-retired");
+  expect(slack.posts[0].text).not.toContain("v1/llama3-70b");
+  expect(slack.posts[0].text).toContain("All probes fully green");
+});
+
+it("runDigest falls open when the snapshot blob is missing (no filter)", async () => {
+  const artifact: RunArtifact = {
+    runId: "r",
+    startedAt: "2026-04-20T06:00:00Z",
+    completedAt: "2026-04-20T06:00:30Z",
+    outcomes: [
+      {
+        signature: "v2/model/whatever",
+        label: "x",
+        endpoint: "u",
+        apiVersion: "v2",
+        httpStatus: 500,
+        verdict: "FAIL",
+        severity: "RED",
+        durationMs: 10,
+        details: {},
+        completedAt: 1,
+      },
+    ],
+  };
+  const gcs = fakeGcs({
+    // Deliberately NO snapshot — emulates a very-first-digest-ever run.
+    files: { "runs/2026/04/20/06-r.json": artifact },
+    list: ["runs/2026/04/20/06-r.json"],
+  });
+  const slack = fakeSlack();
+
+  const summary = await runDigest(
+    CONFIG,
+    { gcs, slack },
+    new Date("2026-04-20T18:00:00Z")
+  );
+
+  // No filtering applied — the single RED outcome still surfaces.
+  expect(summary.probesRun).toBe(1);
+  expect(summary.severityCounts.RED).toBe(1);
+});
+
 it("runDigest renders a subdued baseline note on the first-snapshot case", async () => {
   const artifact: RunArtifact = {
     runId: "r",

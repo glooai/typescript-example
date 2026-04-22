@@ -23,8 +23,10 @@
  */
 
 import type { CanaryConfig } from "../config.js";
+import { currentProbeSignatures } from "../fixtures/index.js";
 import type { ModelRegistryDelta } from "../fixtures/model-registry-delta.js";
 import type { GcsClient, RunArtifact } from "../sinks/gcs.js";
+import { loadLatestSnapshot } from "../sinks/model-registry-snapshot.js";
 import type { SlackClient } from "../sinks/slack.js";
 import type { Severity, Verdict } from "../probes/types.js";
 
@@ -168,12 +170,25 @@ function worstOf(current: Severity, next: Severity): Severity {
   return "GREEN";
 }
 
+export type SummarizeOptions = {
+  /**
+   * When provided, outcomes whose signature is not in this set are
+   * skipped entirely — not counted toward probesRun, severityCounts,
+   * verdictCounts, or perProbe. Use this to filter retired-from-probe
+   * signatures whose archived outcomes still live in the 24h window.
+   * Pass null to disable filtering (legacy / fail-open behavior).
+   */
+  allowedSignatures?: Set<string> | null;
+};
+
 export function summarize(
   artifacts: RunArtifact[],
   archival: DigestSummary["archival"],
-  now: Date
+  now: Date,
+  options: SummarizeOptions = {}
 ): DigestSummary {
   const earliest = artifacts[0]?.startedAt ?? now.toISOString();
+  const allowed = options.allowedSignatures ?? null;
   const perProbeAgg = new Map<
     string,
     {
@@ -212,6 +227,12 @@ export function summarize(
       severityCounts.YELLOW += delta.added.length + delta.removed.length;
     }
     for (const outcome of artifact.outcomes) {
+      // Skip outcomes whose signature is no longer in the current probe
+      // set — e.g., old archived runs for a model that's since been
+      // retired from the registry. Their historical red/yellow verdicts
+      // shouldn't drive "Needs attention" on today's digest because
+      // today's canary isn't probing them.
+      if (allowed !== null && !allowed.has(outcome.signature)) continue;
       probesRun++;
       severityCounts[outcome.severity]++;
       verdictCounts[outcome.verdict]++;
@@ -342,7 +363,18 @@ export async function runDigest(
 ): Promise<DigestSummary> {
   const artifacts = await loadWindow(deps.gcs, now);
   const archival = await gatherArchivalState(deps.gcs, now);
-  const summary = summarize(artifacts, archival, now);
+
+  // Fetch the current probe signature set from the most recent registry
+  // snapshot. Falls back to null (no filter) if the snapshot blob is
+  // missing — e.g., very first digest after deploy, before any probe
+  // has written the snapshot. Fail-open on purpose: a missing snapshot
+  // must not silence the canary's top-level alerts.
+  const snapshot = await loadLatestSnapshot(deps.gcs);
+  const allowedSignatures = snapshot
+    ? new Set(currentProbeSignatures(snapshot.modelIds))
+    : null;
+
+  const summary = summarize(artifacts, archival, now, { allowedSignatures });
 
   const topLevel = formatDigestTopLevel(summary);
   const posted = await deps.slack.post({ text: topLevel });
@@ -488,20 +520,18 @@ export function formatRegistryDeltaBlock(delta: ModelRegistryDelta): string {
   // YELLOW-flavored emoji: registry adds/removes are "something shifted,
   // not broken" — not a RED alert. RED is reserved for probes targeting
   // currently-supported models that actually fail.
+  //
+  // One bullet per add/remove — icon + model-id on a single line — so
+  // the block stays tight. Adds listed first (present-and-new is usually
+  // what readers scan for), then removes.
   const lines: string[] = [
     `:large_yellow_circle: *\`/platform/v2/models\` changed since last snapshot*`,
   ];
-  if (delta.added.length > 0) {
-    const bullets = delta.added.map((id) => `  • \`${id}\``).join("\n");
-    lines.push(
-      `• :heavy_plus_sign: *Added (${delta.added.length}):*\n${bullets}`
-    );
+  for (const id of delta.added) {
+    lines.push(`• :heavy_plus_sign: \`${id}\``);
   }
-  if (delta.removed.length > 0) {
-    const bullets = delta.removed.map((id) => `  • \`${id}\``).join("\n");
-    lines.push(
-      `• :heavy_minus_sign: *Removed (${delta.removed.length}):*\n${bullets}`
-    );
+  for (const id of delta.removed) {
+    lines.push(`• :heavy_minus_sign: \`${id}\``);
   }
   lines.push(
     `_Previous snapshot: ${delta.previousCapturedAt} · current: ${delta.currentCapturedAt}._`

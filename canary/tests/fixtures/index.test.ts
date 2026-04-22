@@ -4,6 +4,7 @@ import {
   V2_ROUTING_FIXTURES,
   buildV2DirectModelFixtures,
   buildV2Fixtures,
+  currentProbeSignatures,
 } from "../../src/fixtures/index.js";
 
 it("V1_FIXTURES is empty — V1 is deprecated and intentionally not probed", () => {
@@ -82,6 +83,27 @@ it("buildV2Fixtures concatenates routing-mode + injected direct-model fixtures",
   expect(signatures).toContain("v2/family/anthropic");
   expect(signatures).toContain("v2/model/gloo-openai-gpt-5.2");
   expect(fixtures.length).toBe(V2_ROUTING_FIXTURES.length + 1);
+});
+
+it("currentProbeSignatures includes routing + v2/model/<id> for every live model, plus V1 (empty today)", () => {
+  const sigs = currentProbeSignatures(["gloo-a", "gloo-b"]);
+  expect(sigs).toContain("v2/auto_routing");
+  expect(sigs).toContain("v2/family/anthropic");
+  expect(sigs).toContain("v2/family/open-source");
+  expect(sigs).toContain("v2/model/gloo-a");
+  expect(sigs).toContain("v2/model/gloo-b");
+  // No V1 entries because V1_FIXTURES is empty today.
+  expect(sigs.every((s) => !s.startsWith("v1/"))).toBe(true);
+  // Total = V2_ROUTING_FIXTURES.length (5) + 2 live models.
+  expect(sigs.length).toBe(V2_ROUTING_FIXTURES.length + 2);
+});
+
+it("currentProbeSignatures produces a known-stable v2/model/<id> slug", () => {
+  // Guards the contract between the probe-build path (where signatures
+  // are emitted) and the digest-filter path (where signatures are
+  // looked up). If either side ever diverges on slug format, this test
+  // fails before the digest silently starts suppressing everything.
+  expect(currentProbeSignatures(["gloo-foo"])).toContain("v2/model/gloo-foo");
 });
 
 it("buildV2Fixtures surfaces loadModels failures so the probe run fails loudly", async () => {
