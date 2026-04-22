@@ -134,6 +134,8 @@ it("chat.update rewrites a previously-posted message", async () => {
   expect(parsed.channel).toBe("C123");
   expect(parsed.ts).toBe("1700000000.000100");
   expect(parsed.text).toContain(":white_check_mark:");
+  expect(parsed.unfurl_links).toBe(false);
+  expect(parsed.unfurl_media).toBe(false);
 });
 
 it("chat.update throws on Slack errors so the caller can log and skip non-fatally", async () => {

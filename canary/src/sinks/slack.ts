@@ -113,6 +113,8 @@ export function createSlackClient(
           ts,
           text,
           blocks,
+          unfurl_links: false,
+          unfurl_media: false,
         }),
       });
       const body = (await res.json()) as { ok: boolean; error?: string };

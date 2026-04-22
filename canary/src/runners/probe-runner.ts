@@ -16,6 +16,7 @@
 import { getAccessToken } from "@glooai/scripts";
 import type { Probe, ProbeOutcome } from "../probes/types.js";
 import type { CanaryConfig } from "../config.js";
+import { extractFamilies } from "../fixtures/index.js";
 import {
   computeRegistryDelta,
   type ModelRegistryDelta,
@@ -132,9 +133,7 @@ async function maybeSnapshotRegistry(
   if (!models) return undefined;
 
   const currentIds = models.map((m) => m.id).sort();
-  const currentFamilies = Array.from(
-    new Set(models.map((m) => m.family).filter((f) => f && f.length > 0))
-  ).sort();
+  const currentFamilies = extractFamilies(models);
   try {
     const previous = await loadLatestSnapshot(deps.gcs);
     const delta = computeRegistryDelta({
@@ -329,11 +328,11 @@ export function formatFailureRecurring(
 
 /**
  * Rewrite a top-level failure post's text to carry a "Recovered"
- * banner and a "~crossed-out~" version of the original first line,
- * while preserving all the original diagnostic detail below. Slack's
- * `chat.update` replaces the full text, so we explicitly keep the
- * old body intact — just prefixed/decorated — so a future triage
- * reader can still see what the original failure was.
+ * banner prefix while preserving all the original diagnostic
+ * detail below. Slack's `chat.update` replaces the full text, so
+ * we explicitly keep the old body intact — just with a green-check
+ * banner prepended — so a future triage reader can still see what
+ * the original failure was.
  *
  * Banner format is chosen to keep the channel-sidebar preview
  * obviously green. Slack renders `:white_check_mark:` as the
