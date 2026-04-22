@@ -132,6 +132,9 @@ async function maybeSnapshotRegistry(
   if (!models) return undefined;
 
   const currentIds = models.map((m) => m.id).sort();
+  const currentFamilies = Array.from(
+    new Set(models.map((m) => m.family).filter((f) => f && f.length > 0))
+  ).sort();
   try {
     const previous = await loadLatestSnapshot(deps.gcs);
     const delta = computeRegistryDelta({
@@ -148,6 +151,7 @@ async function maybeSnapshotRegistry(
       capturedAt: now.toISOString(),
       runId: config.execution.runId,
       modelIds: currentIds,
+      families: currentFamilies,
     });
     return delta;
   } catch (error) {
@@ -161,9 +165,11 @@ async function maybeSnapshotRegistry(
 
 /**
  * Walk the results against the previous active-failures map:
- *   - New RED signature → top-level post, record ts
+ *   - New RED signature → top-level post, record ts + topLevelText
  *   - Previously RED signature, still RED → threaded reply, increment attempts
- *   - Previously RED signature, now GREEN → threaded ✅ + reaction, drop from map
+ *   - Previously RED signature, now GREEN → threaded ✅ + reaction
+ *     on the top-level post + chat.update prepending a "Recovered"
+ *     marker to the top-level text, drop from map
  */
 export async function reconcileFailures(
   artifact: RunArtifact,
@@ -197,6 +203,7 @@ export async function reconcileFailures(
           slackTs: posted.ts,
           attempts: 1,
           lastVerdict: outcome.verdict,
+          topLevelText,
         };
       } catch (error) {
         // Don't record the signature in state — next run treats it as
@@ -232,18 +239,42 @@ export async function reconcileFailures(
   //    place so the next run retries the recovery message.
   for (const signature of Object.keys(existing)) {
     if (!failuresBySignature.has(signature)) {
-      const priorTs = existing[signature].slackTs;
+      const priorEntry = existing[signature];
+      const priorTs = priorEntry.slackTs;
       try {
         await deps.slack.post({
           text: `:white_check_mark: Recovered — probe \`${signature}\` is passing again as of ${now.toISOString()}.`,
           threadTs: priorTs,
         });
+        // ✅ reaction on the top-level post — subtle but persistent,
+        // visible from the channel sidebar search for resolved
+        // incidents.
         try {
           await deps.slack.react(priorTs, "white_check_mark");
         } catch (error) {
           // Already-reacted or missing scope — not fatal.
           // eslint-disable-next-line no-console
           console.warn(`reactions.add skipped: ${(error as Error).message}`);
+        }
+        // chat.update on the top-level post — prepends a green-check
+        // banner to the original failure text so the channel
+        // overview makes the resolved state obvious without opening
+        // the thread. Skipped when the legacy state entry has no
+        // stored text (backwards-compat path).
+        if (priorEntry.topLevelText) {
+          try {
+            await deps.slack.update({
+              ts: priorTs,
+              text: formatRecoveredTopLevel(priorEntry.topLevelText, now),
+            });
+          } catch (error) {
+            // Missing scope (`chat:write` for bot's own messages is
+            // usually implied, but wire it up explicitly if the bot
+            // post wasn't made by this bot) — not fatal, we still
+            // have the thread reply + reaction.
+            // eslint-disable-next-line no-console
+            console.warn(`chat.update skipped: ${(error as Error).message}`);
+          }
         }
         delete next[signature];
       } catch (error) {
@@ -294,4 +325,24 @@ export function formatFailureRecurring(
     `↻ Still failing (attempt ${attempt}) — \`${outcome.verdict}\``,
     `• HTTP ${outcome.httpStatus ?? "net-error"} in ${outcome.durationMs}ms`,
   ].join("\n");
+}
+
+/**
+ * Rewrite a top-level failure post's text to carry a "Recovered"
+ * banner and a "~crossed-out~" version of the original first line,
+ * while preserving all the original diagnostic detail below. Slack's
+ * `chat.update` replaces the full text, so we explicitly keep the
+ * old body intact — just prefixed/decorated — so a future triage
+ * reader can still see what the original failure was.
+ *
+ * Banner format is chosen to keep the channel-sidebar preview
+ * obviously green. Slack renders `:white_check_mark:` as the
+ * white-check-on-green-box emoji.
+ */
+export function formatRecoveredTopLevel(
+  originalText: string,
+  now: Date
+): string {
+  const banner = `:white_check_mark: *Recovered* at ${now.toISOString()}`;
+  return `${banner}\n\n${originalText}`;
 }

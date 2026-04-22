@@ -66,13 +66,16 @@ function fakeGcs(initial: {
 function fakeSlack(): SlackClient & {
   posts: Array<{ text: string; threadTs?: string }>;
   reactions: Array<{ ts: string; emoji: string }>;
+  updates: Array<{ ts: string; text: string }>;
 } {
   let ts = 1700000000;
   const posts: Array<{ text: string; threadTs?: string }> = [];
   const reactions: Array<{ ts: string; emoji: string }> = [];
+  const updates: Array<{ ts: string; text: string }> = [];
   return {
     posts,
     reactions,
+    updates,
     async post({ text, threadTs }) {
       posts.push({ text, threadTs });
       ts += 1;
@@ -80,6 +83,9 @@ function fakeSlack(): SlackClient & {
     },
     async react(tsVal, emoji) {
       reactions.push({ ts: tsVal, emoji });
+    },
+    async update({ ts: tsVal, text }) {
+      updates.push({ ts: tsVal, text });
     },
   };
 }
@@ -92,7 +98,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("top-level-posts new failures and persists their ts", async () => {
+it("top-level-posts new failures and persists their ts + topLevelText", async () => {
   const gcs = fakeGcs({});
   const slack = fakeSlack();
   const artifact: RunArtifact = {
@@ -116,6 +122,11 @@ it("top-level-posts new failures and persists their ts", async () => {
   const state = gcs.writes.get("state/active-failures.json") as ActiveFailures;
   expect(state["v1/sonnet-4"]).toBeDefined();
   expect(state["v1/sonnet-4"].attempts).toBe(1);
+  // topLevelText is captured at post time so the future recovery
+  // path can reuse it for chat.update without re-synthesizing the
+  // text.
+  expect(state["v1/sonnet-4"].topLevelText).toContain("Canary RED");
+  expect(state["v1/sonnet-4"].topLevelText).toContain("v1/sonnet-4");
 });
 
 it("threads recurring failures onto the original post", async () => {
@@ -152,7 +163,7 @@ it("threads recurring failures onto the original post", async () => {
   expect(state["v1/sonnet-4"].attempts).toBe(2);
 });
 
-it("posts a recovery thread + reacts ✅ when a failure clears", async () => {
+it("posts a recovery thread + reacts ✅ + updates the top-level post when a failure clears", async () => {
   const gcs = fakeGcs({
     activeFailures: {
       "v1/sonnet-4": {
@@ -161,6 +172,8 @@ it("posts a recovery thread + reacts ✅ when a failure clears", async () => {
         slackTs: "1700000001.000000",
         attempts: 1,
         lastVerdict: "FAIL",
+        topLevelText:
+          ":rotating_light: *Canary RED — V1 · sonnet-4*\n• *Verdict:* FAIL",
       },
     },
   });
@@ -180,13 +193,118 @@ it("posts a recovery thread + reacts ✅ when a failure clears", async () => {
 
   await reconcileFailures(artifact, { probes: [], gcs, slack }, CONFIG, NOW);
 
+  // Threaded reply still posted.
   expect(slack.posts[0].text).toContain("Recovered");
   expect(slack.posts[0].threadTs).toBe("1700000001.000000");
+  // Reaction on the top-level ts — the persistent emoji badge
+  // that's visible from the channel sidebar.
   expect(slack.reactions).toEqual([
     { ts: "1700000001.000000", emoji: "white_check_mark" },
   ]);
+  // Top-level post edited to prepend a green-check banner so the
+  // channel overview preview tells the "resolved" story at a glance,
+  // while the original failure text is preserved below for triage.
+  expect(slack.updates).toHaveLength(1);
+  expect(slack.updates[0].ts).toBe("1700000001.000000");
+  expect(slack.updates[0].text).toContain(":white_check_mark:");
+  expect(slack.updates[0].text).toContain("*Recovered*");
+  expect(slack.updates[0].text).toContain("Canary RED — V1 · sonnet-4");
+
   const state = gcs.writes.get("state/active-failures.json") as ActiveFailures;
   expect(state["v1/sonnet-4"]).toBeUndefined();
+});
+
+it("recovery still works when the legacy state entry has no stored topLevelText (backcompat)", async () => {
+  // State blobs written before `topLevelText` was added must not crash
+  // the recovery path — we skip chat.update but still post the thread
+  // reply + add the reaction. Without this, an already-open failure
+  // from the old code path would stay red in the channel overview
+  // forever after recovery.
+  const gcs = fakeGcs({
+    activeFailures: {
+      "v1/legacy": {
+        firstSeenAt: "2026-04-20T14:00:00Z",
+        lastSeenAt: "2026-04-20T14:00:00Z",
+        slackTs: "1700000001.000000",
+        attempts: 3,
+        lastVerdict: "FAIL",
+        // topLevelText intentionally omitted
+      },
+    },
+  });
+  const slack = fakeSlack();
+  const artifact: RunArtifact = {
+    runId: "run-abc",
+    startedAt: NOW.toISOString(),
+    completedAt: NOW.toISOString(),
+    outcomes: [
+      makeOutcome({
+        signature: "v1/legacy",
+        verdict: "PASS",
+        severity: "GREEN",
+      }),
+    ],
+  };
+
+  await reconcileFailures(artifact, { probes: [], gcs, slack }, CONFIG, NOW);
+
+  expect(slack.posts[0].text).toContain("Recovered");
+  expect(slack.reactions).toHaveLength(1);
+  // No chat.update since we have no original text to preserve.
+  expect(slack.updates).toHaveLength(0);
+  const state = gcs.writes.get("state/active-failures.json") as ActiveFailures;
+  expect(state["v1/legacy"]).toBeUndefined();
+});
+
+it("a failed chat.update does not block the recovery — state still clears", async () => {
+  // If Slack returns missing_scope or the token lacks chat:write, the
+  // recovery path must still delete the signature from active-failures
+  // and post the thread reply. Worst case we lose the green-check
+  // banner on that one top-level post; better than leaving the
+  // failure signature in state forever (which would suppress
+  // re-alerts on the next fresh outage).
+  const gcs = fakeGcs({
+    activeFailures: {
+      "v1/update-blocked": {
+        firstSeenAt: "2026-04-20T14:00:00Z",
+        lastSeenAt: "2026-04-20T14:00:00Z",
+        slackTs: "1700000001.000000",
+        attempts: 1,
+        lastVerdict: "FAIL",
+        topLevelText: "original failure text",
+      },
+    },
+  });
+  const slack: SlackClient & {
+    posts: Array<{ text: string; threadTs?: string }>;
+  } = {
+    posts: [],
+    async post({ text, threadTs }) {
+      this.posts.push({ text, threadTs });
+      return { ts: "x", channel: "C" };
+    },
+    async react() {},
+    async update() {
+      throw new Error("missing_scope");
+    },
+  };
+  const artifact: RunArtifact = {
+    runId: "run-abc",
+    startedAt: NOW.toISOString(),
+    completedAt: NOW.toISOString(),
+    outcomes: [
+      makeOutcome({
+        signature: "v1/update-blocked",
+        verdict: "PASS",
+        severity: "GREEN",
+      }),
+    ],
+  };
+
+  await reconcileFailures(artifact, { probes: [], gcs, slack }, CONFIG, NOW);
+
+  const state = gcs.writes.get("state/active-failures.json") as ActiveFailures;
+  expect(state["v1/update-blocked"]).toBeUndefined();
 });
 
 it("formats top-level failure posts with the signature + metadata", () => {
@@ -274,6 +392,7 @@ it("keeps reconciling + persisting state when a Slack post throws (R1)", async (
       return { ts: "1700000000.000001", channel: "C" };
     },
     async react() {},
+    async update() {},
   };
   const artifact: RunArtifact = {
     runId: "run-abc",

@@ -109,3 +109,45 @@ it("throws on non-already_reacted errors", async () => {
     /missing_scope/
   );
 });
+
+it("chat.update rewrites a previously-posted message", async () => {
+  const calls: Array<{ url: string; body: string }> = [];
+  const fetchImpl = vi
+    .fn()
+    .mockImplementation(async (url: string, init: RequestInit) => {
+      calls.push({ url, body: String(init.body) });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+
+  const slack = createSlackClient(
+    "xoxb-fake",
+    "C123",
+    fetchImpl as unknown as typeof fetch
+  );
+  await slack.update({
+    ts: "1700000000.000100",
+    text: ":white_check_mark: Recovered — original failure text",
+  });
+
+  expect(calls[0].url).toBe("https://slack.com/api/chat.update");
+  const parsed = JSON.parse(calls[0].body);
+  expect(parsed.channel).toBe("C123");
+  expect(parsed.ts).toBe("1700000000.000100");
+  expect(parsed.text).toContain(":white_check_mark:");
+});
+
+it("chat.update throws on Slack errors so the caller can log and skip non-fatally", async () => {
+  const fetchImpl = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ ok: false, error: "message_not_found" }), {
+      status: 200,
+    })
+  );
+  const slack = createSlackClient(
+    "xoxb-fake",
+    "C123",
+    fetchImpl as unknown as typeof fetch
+  );
+  await expect(slack.update({ ts: "1700000000", text: "hi" })).rejects.toThrow(
+    /message_not_found/
+  );
+});

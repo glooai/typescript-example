@@ -371,7 +371,9 @@ export async function runDigest(
   // must not silence the canary's top-level alerts.
   const snapshot = await loadLatestSnapshot(deps.gcs);
   const allowedSignatures = snapshot
-    ? new Set(currentProbeSignatures(snapshot.modelIds))
+    ? new Set(
+        currentProbeSignatures(snapshot.modelIds, snapshot.families ?? [])
+      )
     : null;
 
   const summary = summarize(artifacts, archival, now, { allowedSignatures });

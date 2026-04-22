@@ -29,13 +29,23 @@ export type RunArtifact = {
 };
 
 export type ActiveFailures = {
-  // signature -> { firstSeenAt, lastSeenAt, slackTs, attempts, lastOutcome }
+  // signature -> { firstSeenAt, lastSeenAt, slackTs, attempts, lastOutcome, topLevelText? }
   [signature: string]: {
     firstSeenAt: string;
     lastSeenAt: string;
     slackTs: string;
     attempts: number;
     lastVerdict: string;
+    /**
+     * Text of the original top-level failure post. Captured so the
+     * recovery path can `chat.update` that post to prepend a
+     * `:white_check_mark: *Recovered*` marker — the reaction alone
+     * is easy to miss in the channel overview. Optional for
+     * backwards-compat with state blobs written before this field
+     * was added; when absent we skip the chat.update and still post
+     * the threaded recovery reply + add the reaction.
+     */
+    topLevelText?: string;
   };
 };
 
