@@ -10,7 +10,7 @@ import { createGcsClient } from "./sinks/gcs.js";
 import { createSlackClient } from "./sinks/slack.js";
 import { buildV1Probe } from "./probes/v1-messages.js";
 import { buildV2Probe } from "./probes/v2-completions.js";
-import { V1_FIXTURES, V2_FIXTURES } from "./fixtures/index.js";
+import { V1_FIXTURES, buildV2Fixtures } from "./fixtures/index.js";
 import { runProbes } from "./runners/probe-runner.js";
 import { runDigest } from "./runners/digest-runner.js";
 
@@ -23,9 +23,15 @@ export async function main(): Promise<void> {
   );
 
   if (config.mode === "probe") {
+    // Hydrate the V2 probe list from the authoritative model registry on
+    // every run — if `/platform/v2/models` is unreachable this throws and
+    // the job exits non-zero, which is the correct behavior: a canary
+    // running zero direct-model probes is strictly less useful than one
+    // that fails loudly and surfaces the outage in Cloud Run logs.
+    const v2Fixtures = await buildV2Fixtures();
     const probes = [
       ...V1_FIXTURES.map(buildV1Probe),
-      ...V2_FIXTURES.map(buildV2Probe),
+      ...v2Fixtures.map(buildV2Probe),
     ];
     const artifact = await runProbes(config, { probes, gcs, slack });
     // eslint-disable-next-line no-console
