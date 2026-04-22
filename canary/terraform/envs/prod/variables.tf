@@ -28,11 +28,20 @@ variable "results_retention_days" {
   default     = 90
 }
 
-variable "probe_schedule_cron" {
-  description = "Probe-job cron expression (America/Chicago timezone)."
+variable "probe_daytime_schedule_cron" {
+  description = "Probe-job daytime cron expression (America/Chicago timezone)."
   type        = string
-  # 06:00, 10:00, 14:00, 18:00, 22:00, 02:00 CT — every 4h starting 6am
-  default = "0 6,10,14,18,22,2 * * *"
+  # Every 15 minutes from 06:00 through 16:45 CT (11h daytime window,
+  # 44 runs/day). 17:00 is handed off to the nighttime hourly job.
+  default = "*/15 6-16 * * *"
+}
+
+variable "probe_nighttime_schedule_cron" {
+  description = "Probe-job nighttime cron expression (America/Chicago timezone)."
+  type        = string
+  # Top-of-hour from 17:00 CT through 05:00 CT (13h nighttime window,
+  # 13 runs/day). 06:00 is handed back to the daytime 15-minute job.
+  default = "0 17-23,0-5 * * *"
 }
 
 variable "digest_schedule_cron" {

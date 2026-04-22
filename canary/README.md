@@ -1,10 +1,11 @@
 # Gloo AI Canary
 
 Scheduled integration tests that exercise the Gloo AI platform from
-outside. Probes run every 4 hours (6am/10am/2pm/6pm/10pm/2am Central),
-archive raw results to Google Cloud Storage, and alert Slack on any
-RED-level regression. A separate digest job posts a once-a-day
-aggregate of the last 24h.
+outside. Probes run on a business-hours-biased schedule — every 15
+minutes from 6am–5pm Central, then hourly from 5pm–6am Central (57
+runs/day total). Every run archives raw results to Google Cloud
+Storage and alerts Slack on any RED-level regression. A separate
+digest job posts a once-a-day aggregate of the last 24h.
 
 Purpose: proactively detect changes to the Gloo AI API — schema drift,
 model-alias breakage, routing regressions, or safety-layer over-moderation
@@ -30,7 +31,7 @@ Fixture-driven in `src/fixtures/index.ts` — add new cases there, no code chang
   - **OpenAI:** GPT-5 Nano, Mini, Pro · GPT-5.2
   - **Open source:** Llama 3.1 8B · DeepSeek V3.1 · DeepSeek V3.2 · GPT OSS 120B
 
-Total: **22 probe executions** per scheduled run (6×/day → 132 executions/day).
+Total: **22 probe executions** per scheduled run (57×/day → 1,254 executions/day).
 
 Every probe uses a benign technical-writing prompt and asserts the response:
 
@@ -42,10 +43,11 @@ Every probe uses a benign technical-writing prompt and asserts the response:
 ## Architecture
 
 ```
-┌─ Cloud Scheduler (cron) ─┐     ┌─ Cloud Run Job ──┐
-│ every 4h @ 6am CT start  │ ──> │ canary-probe     │ ──> GCS: runs/YYYY/MM/DD/HH-*.json
-│ daily @ 6:05am CT        │ ──> │ canary-digest    │ ──> Slack: daily digest + failure alerts
-└──────────────────────────┘     └──────────────────┘
+┌─ Cloud Scheduler (cron) ─────┐     ┌─ Cloud Run Job ──┐
+│ */15 06:00–16:45 CT (44/day) │ ──> │ canary-probe     │ ──> GCS: runs/YYYY/MM/DD/HH-*.json
+│ hourly 17:00–05:00 CT (13)   │ ──> │ canary-probe     │
+│ daily @ 06:05 CT             │ ──> │ canary-digest    │ ──> Slack: daily digest + failure alerts
+└──────────────────────────────┘     └──────────────────┘
          │                                │
          │                                ├─ Secret Manager ─> Gloo credentials, Slack bot token
          │                                └─ GCS state ──────> active-failures.json (dedup)

@@ -15,7 +15,10 @@ terraform/envs/prod/
 ├── secrets.tf              # 4 Secret Manager entries (payloads injected OOB)
 ├── storage.tf              # glooai-canary-results bucket + 90-day lifecycle
 ├── cloud_run_jobs.tf       # canary-probe + canary-digest
-├── scheduler.tf            # 2 cron entries (America/Chicago timezone)
+├── scheduler.tf            # 3 cron entries (America/Chicago timezone)
+│                            #   - probe daytime   (*/15 06:00–16:45 CT)
+│                            #   - probe nighttime (hourly 17:00–05:00 CT)
+│                            #   - digest          (daily 06:05 CT)
 └── outputs.tf              # handy identifiers
 ```
 
@@ -60,11 +63,28 @@ terraform apply -var="image_tag=$(git rev-parse --short HEAD)"
 
 ## Cost ceiling
 
-At 6 probe runs + 1 digest run/day × ~60s each, expected monthly cost is
-roughly **$3–8**:
+At 57 probe runs + 1 digest run/day × ~60s each (1 vCPU / 512 MiB),
+expected monthly cost is roughly **$6–14**:
 
-- Cloud Run Jobs: free tier covers >180k req-sec/month
-- Cloud Scheduler: free tier covers 3 jobs
-- Secret Manager: $0.06 per 10k accesses (<$0.05/month)
-- GCS Standard storage: ~$0.02/GB-month (lifecycle keeps us well under 1GB)
+- Cloud Run Jobs: ~3,500 req-sec/day stays inside the monthly free
+  tier (240k vCPU-sec + 450k GiB-sec); overage is billed at
+  $0.000024/vCPU-sec + $0.0000025/GiB-sec
+- Cloud Scheduler: 3 jobs (daytime probe, nighttime probe, digest) —
+  exactly at the free-tier ceiling
+- Secret Manager: $0.06 per 10k accesses (~$0.10/month at 57 runs/day
+  × 4 secrets)
+- GCS Standard storage: ~$0.02/GB-month (the 90-day lifecycle rule
+  keeps the bucket well under 1 GB even at 57 runs/day, since each
+  archive is gzipped JSON ~10 KB)
 - Artifact Registry: $0.10/GB-month for image storage
+
+Optimisation choices baked into the terraform:
+
+- Two scheduler jobs (daytime + nighttime) instead of one
+  minute-level cron fired 1,440×/day and gated in-code — ~25× fewer
+  Cloud Run invocations during the quiet window
+- `retry_count = 0` on the probe scheduler — probes are idempotent
+  and the next scheduled run is the real retry path, so paying for a
+  scheduler retry is double-billing
+- GCS objects are gzipped JSON (~70–80% compression over raw), which
+  keeps storage + egress minimal over the full 90-day window

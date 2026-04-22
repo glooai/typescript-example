@@ -3,7 +3,9 @@
  * and posts failure alerts to Slack with dedup via the GCS state file.
  *
  * Expected to be the entry point of the `canary-probe` Cloud Run Job,
- * triggered by Cloud Scheduler every 4h.
+ * triggered by Cloud Scheduler on a business-hours-biased cadence:
+ * every 15 min 06:00–16:45 CT (daytime) and hourly 17:00–05:00 CT
+ * (nighttime) — 57 runs/day total.
  */
 
 import { getAccessToken } from "@glooai/scripts";
