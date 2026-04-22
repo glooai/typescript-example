@@ -216,15 +216,19 @@ it("gatherArchivalState reports object count, bytes, and oldest age", async () =
   expect(state.oldestAgeDays).toBeGreaterThanOrEqual(19);
 });
 
-it("runDigest composes a summary, posts top-level, and threads YELLOW notes", async () => {
+it("runDigest posts individualized YELLOW threads instead of a batch insights post", async () => {
+  // One probe with both a green outcome and a yellow outcome — the probe
+  // rolls up to worstSeverity=YELLOW and gets an individualized thread.
+  // One probe with a single green outcome — rolls up into the all-green
+  // thread post.
   const artifactA: RunArtifact = {
     runId: "run-a",
     startedAt: "2026-04-20T06:00:00Z",
     completedAt: "2026-04-20T06:00:30Z",
     outcomes: [
       {
-        signature: "v2/auto",
-        label: "V2 · auto",
+        signature: "v2/slow",
+        label: "V2 · slow",
         endpoint: "u",
         apiVersion: "v2",
         httpStatus: 200,
@@ -235,8 +239,8 @@ it("runDigest composes a summary, posts top-level, and threads YELLOW notes", as
         completedAt: 1700000000,
       },
       {
-        signature: "v2/auto",
-        label: "V2 · auto",
+        signature: "v2/slow",
+        label: "V2 · slow",
         endpoint: "u",
         apiVersion: "v2",
         httpStatus: 200,
@@ -245,6 +249,18 @@ it("runDigest composes a summary, posts top-level, and threads YELLOW notes", as
         durationMs: 9500,
         details: { note: "latency spike" },
         completedAt: 1700000000,
+      },
+      {
+        signature: "v2/fast",
+        label: "V2 · fast",
+        endpoint: "u",
+        apiVersion: "v2",
+        httpStatus: 200,
+        verdict: "PASS",
+        severity: "GREEN",
+        durationMs: 400,
+        details: {},
+        completedAt: 1700000050,
       },
     ],
   };
@@ -261,17 +277,29 @@ it("runDigest composes a summary, posts top-level, and threads YELLOW notes", as
     new Date("2026-04-20T18:00:00Z")
   );
 
-  expect(summary.probesRun).toBe(2);
+  expect(summary.probesRun).toBe(3);
   expect(summary.severityCounts.YELLOW).toBe(1);
 
-  // 2 posts: the top-level digest + the yellow-notes thread reply
-  expect(slack.posts).toHaveLength(2);
+  // 3 posts: top-level + all-green roll-up + YELLOW individualized breakdown
+  expect(slack.posts).toHaveLength(3);
   expect(slack.posts[0].threadTs).toBeUndefined();
-  expect(slack.posts[1].threadTs).toBeDefined();
-  expect(slack.posts[1].text).toContain("Secondary insights");
+
+  // Top-level surfaces v2/slow as the yellow probe, hides v2/fast.
+  expect(slack.posts[0].text).toMatch(/• 🟡 `v2\/slow`/);
+  expect(slack.posts[0].text).not.toMatch(/`v2\/fast`/);
+  expect(slack.posts[0].text).toContain("🟢 1 probe fully green");
+
+  // Threaded replies: one all-green roll-up and one yellow breakdown.
+  const greenThread = slack.posts[1];
+  const yellowThread = slack.posts[2];
+  expect(greenThread.threadTs).toBeDefined();
+  expect(greenThread.text).toContain("All-green probes (1)");
+  expect(greenThread.text).toContain("🟢 `v2/fast`");
+  expect(yellowThread.threadTs).toBe(greenThread.threadTs);
+  expect(yellowThread.text).toContain("*Breakdown for `v2/slow`*");
 });
 
-it("runDigest skips the YELLOW thread when there are no yellow notes", async () => {
+it("runDigest posts a single all-green thread reply when every probe is GREEN", async () => {
   const artifact: RunArtifact = {
     runId: "r",
     startedAt: "2026-04-20T06:00:00Z",
@@ -299,13 +327,16 @@ it("runDigest skips the YELLOW thread when there are no yellow notes", async () 
   const slack = fakeSlack();
 
   await runDigest(CONFIG, { gcs, slack }, new Date("2026-04-20T18:00:00Z"));
-  expect(slack.posts).toHaveLength(1);
+  // Top-level post + single all-green roll-up in thread.
+  expect(slack.posts).toHaveLength(2);
+  expect(slack.posts[0].text).toContain("All probes fully green");
+  expect(slack.posts[1].threadTs).toBeDefined();
+  expect(slack.posts[1].text).toContain("All-green probes (1)");
 });
 
-it("runDigest posts one threaded breakdown per red probe", async () => {
+it("runDigest posts one individualized threaded breakdown per red probe and rolls greens up", async () => {
   // Two failing probes (v1/bad and v2/meh) plus one passing probe.
-  // We expect exactly 3 slack.post calls: the top-level digest plus
-  // one threaded reply per failing probe. No YELLOW thread this run.
+  // We expect: top-level + all-green thread (for v2/auto) + 2 RED threads.
   const artifact: RunArtifact = {
     runId: "r",
     startedAt: "2026-04-20T06:00:00Z",
@@ -358,21 +389,27 @@ it("runDigest posts one threaded breakdown per red probe", async () => {
 
   await runDigest(CONFIG, { gcs, slack }, new Date("2026-04-20T18:00:00Z"));
 
-  // 1 top-level + 2 thread replies (one per failing probe). No
-  // yellow-notes thread because all failing outcomes are RED.
-  expect(slack.posts).toHaveLength(3);
+  // 1 top-level + 1 all-green thread + 2 RED thread replies.
+  expect(slack.posts).toHaveLength(4);
   expect(slack.posts[0].threadTs).toBeUndefined();
   expect(slack.posts[0].text).toContain("🔴 `v1/bad`");
   expect(slack.posts[0].text).toContain("🔴 `v2/meh`");
-  expect(slack.posts[0].text).toContain("🟢 `v2/auto`");
+  // The green probe is rolled up, not listed individually, in the top-level.
+  expect(slack.posts[0].text).not.toMatch(/• 🟢 `v2\/auto`/);
+  expect(slack.posts[0].text).toContain("🟢 1 probe fully green");
 
-  // Both thread replies target the digest ts.
+  // All replies target the digest ts.
   const threadTs = slack.posts[1].threadTs;
   expect(threadTs).toBeDefined();
   expect(slack.posts[2].threadTs).toBe(threadTs);
+  expect(slack.posts[3].threadTs).toBe(threadTs);
 
-  // Each thread reply names the probe it's breaking down.
-  const threadTexts = [slack.posts[1].text, slack.posts[2].text];
-  expect(threadTexts.some((t) => t.includes("`v1/bad`"))).toBe(true);
-  expect(threadTexts.some((t) => t.includes("`v2/meh`"))).toBe(true);
+  // First thread post is the all-green roll-up.
+  expect(slack.posts[1].text).toContain("All-green probes (1)");
+  expect(slack.posts[1].text).toContain("`v2/auto`");
+
+  // Remaining two are the individualized RED breakdowns, one per probe.
+  const redThreads = [slack.posts[2].text, slack.posts[3].text];
+  expect(redThreads.some((t) => t.includes("`v1/bad`"))).toBe(true);
+  expect(redThreads.some((t) => t.includes("`v2/meh`"))).toBe(true);
 });

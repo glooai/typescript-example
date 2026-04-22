@@ -1,10 +1,11 @@
 import { expect, it } from "vitest";
 import {
   buildRunPrefixes,
-  collectYellowNotes,
   countMix,
+  formatAllGreenThread,
   formatDigestTopLevel,
   formatProbeFailureThread,
+  formatProbeYellowThread,
   humanBytes,
   percentile,
   summarize,
@@ -92,34 +93,141 @@ it("summarizes severity + verdict counts and per-probe latency quantiles", () =>
   const auto = summary.perProbe.find((p) => p.signature === "v2/auto");
   expect(auto?.passing).toBe(2);
   expect(auto?.failing).toBe(0);
+  expect(auto?.worstSeverity).toBe("GREEN");
   expect(auto?.p50Ms).toBe(100);
+
+  const sonnet = summary.perProbe.find((p) => p.signature === "v1/sonnet-4");
+  expect(sonnet?.worstSeverity).toBe("RED");
 });
 
-it("collects YELLOW-severity notes for the digest thread", () => {
+it("summarize assigns worstSeverity = YELLOW when a probe has yellow-only outcomes", () => {
   const artifact = makeArtifact([
-    makeOutcome({ signature: "v2/auto", severity: "GREEN" }),
+    makeOutcome({ signature: "v2/slow", durationMs: 500 }),
     makeOutcome({
-      signature: "v2/auto",
+      signature: "v2/slow",
       severity: "YELLOW",
       verdict: "PASS",
       durationMs: 9500,
     }),
   ]);
-  const notes = collectYellowNotes([artifact]);
-  expect(notes.length).toBe(1);
-  expect(notes[0]).toContain("9500ms");
-});
-
-it("formats the top-level digest post differently when all-green vs. red", () => {
-  const greenSummary = summarize(
-    [makeArtifact([makeOutcome({ signature: "v2/auto" })])],
+  const summary = summarize(
+    [artifact],
     { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
     NOW
   );
-  const greenPost = formatDigestTopLevel(greenSummary);
-  expect(greenPost).toContain(":large_green_circle:");
-  expect(greenPost).toContain("24h Digest");
+  const slow = summary.perProbe.find((p) => p.signature === "v2/slow");
+  expect(slow?.worstSeverity).toBe("YELLOW");
+  expect(slow?.yellowing).toBe(1);
+  expect(slow?.yellowOutcomes).toHaveLength(1);
+  expect(slow?.yellowOutcomes[0].durationMs).toBe(9500);
+});
 
+it("summarize escalates worstSeverity to RED when any outcome is RED", () => {
+  const artifact = makeArtifact([
+    makeOutcome({ signature: "v2/mixed" }),
+    makeOutcome({
+      signature: "v2/mixed",
+      severity: "YELLOW",
+      verdict: "PASS",
+      durationMs: 9500,
+    }),
+    makeOutcome({
+      signature: "v2/mixed",
+      severity: "RED",
+      verdict: "FAIL",
+      httpStatus: 503,
+    }),
+  ]);
+  const summary = summarize(
+    [artifact],
+    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
+    NOW
+  );
+  const mixed = summary.perProbe.find((p) => p.signature === "v2/mixed");
+  expect(mixed?.worstSeverity).toBe("RED");
+  // Yellow outcome is still captured for the yellow breakdown section.
+  expect(mixed?.yellowOutcomes).toHaveLength(1);
+  expect(mixed?.failures).toHaveLength(1);
+});
+
+it("top-level digest hides fully-green probes behind a roll-up line", () => {
+  const summary = summarize(
+    [
+      makeArtifact([
+        // Three fully-green probes.
+        makeOutcome({ signature: "v2/a" }),
+        makeOutcome({ signature: "v2/b" }),
+        makeOutcome({ signature: "v2/c" }),
+        // One red probe that should appear in the top-level.
+        makeOutcome({
+          signature: "v1/bad",
+          severity: "RED",
+          verdict: "FAIL",
+          httpStatus: 503,
+        }),
+      ]),
+    ],
+    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
+    NOW
+  );
+  const post = formatDigestTopLevel(summary);
+
+  // RED probe surfaces in-line with a glyph.
+  expect(post).toMatch(/• 🔴 `v1\/bad` — 0\/1 pass/);
+  // The three green probes do NOT appear as individual bullets.
+  expect(post).not.toMatch(/`v2\/a`/);
+  expect(post).not.toMatch(/`v2\/b`/);
+  expect(post).not.toMatch(/`v2\/c`/);
+  // …they get rolled up into a single "N fully green — see thread" line.
+  expect(post).toContain("🟢 3 probes fully green");
+  expect(post).toContain("Needs attention");
+});
+
+it("top-level digest surfaces YELLOW probes alongside REDs", () => {
+  const summary = summarize(
+    [
+      makeArtifact([
+        makeOutcome({
+          signature: "v2/slow",
+          severity: "YELLOW",
+          verdict: "PASS",
+          durationMs: 9500,
+        }),
+        makeOutcome({
+          signature: "v1/bad",
+          severity: "RED",
+          verdict: "FAIL",
+          httpStatus: 503,
+        }),
+      ]),
+    ],
+    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
+    NOW
+  );
+  const post = formatDigestTopLevel(summary);
+  expect(post).toMatch(/• 🟡 `v2\/slow`/);
+  expect(post).toMatch(/• 🔴 `v1\/bad`/);
+});
+
+it("top-level digest uses an all-green header and a celebratory body when nothing failed", () => {
+  const summary = summarize(
+    [
+      makeArtifact([
+        makeOutcome({ signature: "v2/a" }),
+        makeOutcome({ signature: "v2/b" }),
+      ]),
+    ],
+    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
+    NOW
+  );
+  const post = formatDigestTopLevel(summary);
+  expect(post).toContain(":large_green_circle:");
+  expect(post).toContain("All probes fully green");
+  // Green probes are detailed in the thread, not in the top-level body.
+  expect(post).not.toMatch(/`v2\/a`/);
+});
+
+it("top-level digest uses the rotating-light emoji when any probe is RED", () => {
   const redSummary = summarize(
     [
       makeArtifact([
@@ -133,33 +241,41 @@ it("formats the top-level digest post differently when all-green vs. red", () =>
     { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
     NOW
   );
-  const redPost = formatDigestTopLevel(redSummary);
-  expect(redPost).toContain(":rotating_light:");
+  expect(formatDigestTopLevel(redSummary)).toContain(":rotating_light:");
 });
 
-it("prefixes each per-probe bullet with 🔴/🟢 so failing probes are scannable", () => {
-  const summary = summarize(
-    [
-      makeArtifact([
-        makeOutcome({ signature: "v2/good" }),
-        makeOutcome({
-          signature: "v1/bad",
-          severity: "RED",
-          verdict: "FAIL",
-          httpStatus: 503,
-        }),
-      ]),
-    ],
-    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
-    NOW
-  );
-  const post = formatDigestTopLevel(summary);
-  // The passing probe renders green.
-  expect(post).toMatch(/• 🟢 `v2\/good` — 1\/1 pass/);
-  // The failing probe renders red even though the overall line already
-  // carries a severity counter — per-bullet emoji is the at-a-glance
-  // affordance we just added.
-  expect(post).toMatch(/• 🔴 `v1\/bad` — 0\/1 pass/);
+it("formatAllGreenThread lists each fully-green probe with its latency bounds", () => {
+  const text = formatAllGreenThread([
+    {
+      signature: "v2/a",
+      label: "V2 · A",
+      total: 9,
+      passing: 9,
+      failing: 0,
+      yellowing: 0,
+      p50Ms: 1000,
+      p99Ms: 2000,
+      worstSeverity: "GREEN",
+      failures: [],
+      yellowOutcomes: [],
+    },
+    {
+      signature: "v2/b",
+      label: "V2 · B",
+      total: 7,
+      passing: 7,
+      failing: 0,
+      yellowing: 0,
+      p50Ms: 2500,
+      p99Ms: 4000,
+      worstSeverity: "GREEN",
+      failures: [],
+      yellowOutcomes: [],
+    },
+  ]);
+  expect(text).toContain("All-green probes (2)");
+  expect(text).toMatch(/• 🟢 `v2\/a` — 9\/9 pass · p50 1000ms · p99 2000ms/);
+  expect(text).toMatch(/• 🟢 `v2\/b` — 7\/7 pass · p50 2500ms · p99 4000ms/);
 });
 
 it("summarize captures per-probe failure details for the threaded breakdown", () => {
@@ -216,8 +332,11 @@ it("formatProbeFailureThread explains what N/M pass means for a red probe", () =
     total: 8,
     passing: 5,
     failing: 3,
+    yellowing: 0,
     p50Ms: 2804,
     p99Ms: 3576,
+    worstSeverity: "RED",
+    yellowOutcomes: [],
     failures: [
       {
         verdict: "FAIL",
@@ -250,4 +369,40 @@ it("formatProbeFailureThread explains what N/M pass means for a red probe", () =
   // Most recent is the last element after sort.
   expect(text).toContain(new Date(1745020000 * 1000).toISOString());
   expect(text).toContain("p50 2804ms");
+});
+
+it("formatProbeYellowThread surfaces the soft-signal breakdown for a yellow probe", () => {
+  const text = formatProbeYellowThread({
+    signature: "v2/slow",
+    label: "V2 · slow",
+    total: 8,
+    passing: 6,
+    failing: 2,
+    yellowing: 2,
+    p50Ms: 4000,
+    p99Ms: 12000,
+    worstSeverity: "YELLOW",
+    failures: [],
+    yellowOutcomes: [
+      {
+        verdict: "PASS",
+        httpStatus: 200,
+        durationMs: 9500,
+        completedAt: 1745000000,
+      },
+      {
+        verdict: "PASS",
+        httpStatus: 200,
+        durationMs: 11500,
+        completedAt: 1745010000,
+      },
+    ],
+  });
+  expect(text).toContain("*Breakdown for `v2/slow`*");
+  expect(text).toContain("YELLOW signals: 2");
+  expect(text).toContain("PASS × 2");
+  expect(text).toContain("200 × 2");
+  expect(text).toContain(new Date(1745010000 * 1000).toISOString());
+  expect(text).toContain("p50 4000ms");
+  expect(text).toContain("soft signal");
 });

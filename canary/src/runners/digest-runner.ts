@@ -1,7 +1,21 @@
 /**
  * Digest runner — summarizes the last 24h of probe runs into one Slack
- * top-level post. YELLOW-level signals (latency anomalies, routing shifts)
- * go in a thread reply so they don't bloat the channel.
+ * top-level post plus a structured thread.
+ *
+ * Top-level post shows ONLY the signal:
+ *   - Every probe whose worst severity in the window was RED
+ *   - Every probe whose worst severity in the window was YELLOW
+ *   - One roll-up line counting the fully-green probes
+ * The goal is that a reader glancing at the channel can see exactly what
+ * needs attention in a few lines, not scroll past 22 identical green
+ * bullets to find the two broken ones.
+ *
+ * Thread replies (posted against the top-level) carry the detail:
+ *   - One consolidated "all green" post listing every probe that stayed
+ *     fully green in the window (signature + p50/p99)
+ *   - One individualized breakdown per YELLOW probe
+ *   - One individualized breakdown per RED probe (verdict + status mix,
+ *     most recent failure timestamp, full latency distribution)
  *
  * Also reports archival state: object count, oldest age, total bytes.
  * (Actual pruning is handled by the GCS object-lifecycle rule — this
@@ -19,12 +33,12 @@ export type DigestDeps = {
 };
 
 /**
- * One failing run inside the 24h window. We keep just the fields the
+ * One individual outcome in the 24h window. We keep just the fields the
  * per-probe thread reply needs so the digest summary stays compact —
  * the full response payloads already live in the per-failure
  * `Canary RED` top-level alerts and in GCS-archived run artifacts.
  */
-export type PerProbeFailure = {
+export type PerProbeOutcomeSample = {
   verdict: Verdict;
   httpStatus: number | null;
   durationMs: number;
@@ -32,19 +46,40 @@ export type PerProbeFailure = {
   completedAt: number;
 };
 
+/**
+ * Legacy alias. The thread formatters used to be named "failure" because
+ * they only rendered RED outcomes; the YELLOW thread formatter shares the
+ * same shape, so the underlying type is named more neutrally now. Kept as
+ * an alias so downstream imports don't churn.
+ */
+export type PerProbeFailure = PerProbeOutcomeSample;
+
 export type PerProbeEntry = {
   signature: string;
   label: string;
   total: number;
   passing: number;
   failing: number;
+  /** Count of outcomes whose severity was YELLOW (regardless of verdict). */
+  yellowing: number;
   p50Ms: number;
   p99Ms: number;
   /**
-   * Failure details for the threaded breakdown — only populated when
-   * `failing > 0`. Sorted oldest → newest.
+   * Worst severity observed for this signature across the window. Used
+   * to partition probes into the red / yellow / green buckets the top
+   * level and threads render.
    */
-  failures: PerProbeFailure[];
+  worstSeverity: Severity;
+  /**
+   * RED outcome details for the threaded breakdown — only populated when
+   * the probe had at least one RED outcome. Sorted oldest → newest.
+   */
+  failures: PerProbeOutcomeSample[];
+  /**
+   * YELLOW outcome details for the threaded breakdown — only populated
+   * when the probe had at least one YELLOW outcome. Sorted oldest → newest.
+   */
+  yellowOutcomes: PerProbeOutcomeSample[];
 };
 
 export type DigestSummary = {
@@ -117,6 +152,13 @@ export function buildRunPrefixes(now: Date): string[] {
   return Array.from(out);
 }
 
+/** RED > YELLOW > GREEN. Used to bucket probes by their worst window outcome. */
+function worstOf(current: Severity, next: Severity): Severity {
+  if (current === "RED" || next === "RED") return "RED";
+  if (current === "YELLOW" || next === "YELLOW") return "YELLOW";
+  return "GREEN";
+}
+
 export function summarize(
   artifacts: RunArtifact[],
   archival: DigestSummary["archival"],
@@ -130,7 +172,10 @@ export function summarize(
       durations: number[];
       passing: number;
       failing: number;
-      failures: PerProbeFailure[];
+      yellowing: number;
+      worstSeverity: Severity;
+      failures: PerProbeOutcomeSample[];
+      yellowOutcomes: PerProbeOutcomeSample[];
     }
   >();
   const severityCounts: Record<Severity, number> = {
@@ -157,24 +202,30 @@ export function summarize(
         durations: [],
         passing: 0,
         failing: 0,
+        yellowing: 0,
+        worstSeverity: "GREEN" as Severity,
         failures: [],
+        yellowOutcomes: [],
       };
       entry.durations.push(outcome.durationMs);
       if (outcome.verdict === "PASS") entry.passing++;
-      else {
-        entry.failing++;
-        // Only RED-severity outcomes go in the failure breakdown —
-        // YELLOW is reserved for soft signals (latency anomalies,
-        // routing shifts) surfaced in the separate YELLOW thread.
-        if (outcome.severity === "RED") {
-          entry.failures.push({
-            verdict: outcome.verdict,
-            httpStatus: outcome.httpStatus,
-            durationMs: outcome.durationMs,
-            completedAt: outcome.completedAt,
-          });
-        }
+      else entry.failing++;
+
+      entry.worstSeverity = worstOf(entry.worstSeverity, outcome.severity);
+
+      const sample: PerProbeOutcomeSample = {
+        verdict: outcome.verdict,
+        httpStatus: outcome.httpStatus,
+        durationMs: outcome.durationMs,
+        completedAt: outcome.completedAt,
+      };
+      if (outcome.severity === "RED") {
+        entry.failures.push(sample);
+      } else if (outcome.severity === "YELLOW") {
+        entry.yellowing++;
+        entry.yellowOutcomes.push(sample);
       }
+
       perProbeAgg.set(outcome.signature, entry);
     }
   }
@@ -186,9 +237,14 @@ export function summarize(
       total: entry.durations.length,
       passing: entry.passing,
       failing: entry.failing,
+      yellowing: entry.yellowing,
+      worstSeverity: entry.worstSeverity,
       p50Ms: percentile(entry.durations, 0.5),
       p99Ms: percentile(entry.durations, 0.99),
       failures: [...entry.failures].sort(
+        (a, b) => a.completedAt - b.completedAt
+      ),
+      yellowOutcomes: [...entry.yellowOutcomes].sort(
         (a, b) => a.completedAt - b.completedAt
       ),
     })
@@ -254,22 +310,47 @@ export async function runDigest(
   const topLevel = formatDigestTopLevel(summary);
   const posted = await deps.slack.post({ text: topLevel });
 
-  const yellowNotes = collectYellowNotes(artifacts);
-  if (yellowNotes.length > 0) {
-    await deps.slack.post({
-      text: `📝 Secondary insights (last 24h):\n${yellowNotes.join("\n")}`,
-      threadTs: posted.ts,
-    });
+  const greenProbes = summary.perProbe.filter(
+    (p) => p.worstSeverity === "GREEN"
+  );
+  const yellowProbes = summary.perProbe.filter(
+    (p) => p.worstSeverity === "YELLOW"
+  );
+  const redProbes = summary.perProbe.filter((p) => p.worstSeverity === "RED");
+
+  // All-green probes roll up into a single thread reply so the channel
+  // stays scannable but the detail is one click away.
+  if (greenProbes.length > 0) {
+    try {
+      await deps.slack.post({
+        text: formatAllGreenThread(greenProbes),
+        threadTs: posted.ts,
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `slack.post (digest all-green thread) failed: ${(error as Error).message}`
+      );
+    }
   }
 
-  // Post a threaded breakdown for each probe with failures, so the
-  // top-level digest stays scannable while a curious reader can click
-  // into the thread to see what "N/M pass" actually means for a given
-  // probe (verdict mix, HTTP status mix, most recent failure). Each
-  // reply is posted independently with error-swallowing so one bad
-  // reply doesn't block the others.
-  for (const probe of summary.perProbe) {
-    if (probe.failing === 0) continue;
+  // Individualized thread replies per YELLOW and RED probe. Posted
+  // independently so a single bad reply (rate limit, scope missing,
+  // transient blip) doesn't skip the rest.
+  for (const probe of yellowProbes) {
+    try {
+      await deps.slack.post({
+        text: formatProbeYellowThread(probe),
+        threadTs: posted.ts,
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `slack.post (digest yellow thread ${probe.signature}) failed: ${(error as Error).message}`
+      );
+    }
+  }
+  for (const probe of redProbes) {
     try {
       await deps.slack.post({
         text: formatProbeFailureThread(probe),
@@ -278,26 +359,12 @@ export async function runDigest(
     } catch (error) {
       // eslint-disable-next-line no-console
       console.warn(
-        `slack.post (digest thread ${probe.signature}) failed: ${(error as Error).message}`
+        `slack.post (digest red thread ${probe.signature}) failed: ${(error as Error).message}`
       );
     }
   }
 
   return summary;
-}
-
-export function collectYellowNotes(artifacts: RunArtifact[]): string[] {
-  const notes: string[] = [];
-  for (const a of artifacts) {
-    for (const o of a.outcomes) {
-      if (o.severity === "YELLOW") {
-        notes.push(
-          `• ${o.label} — ${o.verdict} (${o.httpStatus ?? "net-err"}) ${o.durationMs}ms`
-        );
-      }
-    }
-  }
-  return notes;
 }
 
 export function formatDigestTopLevel(summary: DigestSummary): string {
@@ -306,18 +373,36 @@ export function formatDigestTopLevel(summary: DigestSummary): string {
   const emoji = red > 0 ? ":rotating_light:" : ":large_green_circle:";
   const header = `${emoji} *Gloo AI Canary — 24h Digest*`;
 
-  // Prefix every per-probe bullet with a 🔴/🟢 glyph so a reader can
-  // spot the failing probes at a glance — the previous "5/8 pass"
-  // numeric-only format buried zero-pass probes in a wall of identical
-  // bullets. We key off `failing > 0` rather than severityCounts so a
-  // probe that emitted only YELLOW outcomes (no RED, no PASS) still
-  // renders green here; the RED glyph is load-bearing.
-  const perProbeLines = summary.perProbe
+  // Only show probes that need attention in the top-level post. Every
+  // probe that was fully green in the window gets rolled up into the
+  // "fully green" line below — their per-bullet detail lives in the
+  // threaded reply so the top-level stays scannable.
+  const notableProbes = summary.perProbe.filter(
+    (p) => p.worstSeverity !== "GREEN"
+  );
+  const greenCount = summary.perProbe.length - notableProbes.length;
+
+  const notableLines = notableProbes
     .map((p) => {
-      const glyph = p.failing > 0 ? "🔴" : "🟢";
+      const glyph = p.worstSeverity === "RED" ? "🔴" : "🟡";
       return `• ${glyph} \`${p.signature}\` — ${p.passing}/${p.total} pass · p50 ${p.p50Ms}ms · p99 ${p.p99Ms}ms`;
     })
     .join("\n");
+
+  let notableBlock: string;
+  if (notableProbes.length === 0) {
+    notableBlock =
+      summary.perProbe.length === 0
+        ? "_(no probes registered)_"
+        : "_All probes fully green — see thread for per-probe details._";
+  } else {
+    notableBlock = notableLines;
+  }
+
+  const greenRollup =
+    notableProbes.length > 0 && greenCount > 0
+      ? `\n_🟢 ${greenCount} ${greenCount === 1 ? "probe" : "probes"} fully green — see thread for details._`
+      : "";
 
   const archival = summary.archival;
   const archivalLine = `• Archive: ${archival.objectCount} objects, ${humanBytes(archival.totalBytes)}, oldest ${archival.oldestAgeDays ?? "?"}d (auto-pruned @ 90d)`;
@@ -328,10 +413,32 @@ export function formatDigestTopLevel(summary: DigestSummary): string {
     `*Probes run:* ${total} across ${summary.runsFound} runs`,
     `*Severity:* 🔴 ${summary.severityCounts.RED}  🟡 ${summary.severityCounts.YELLOW}  🟢 ${summary.severityCounts.GREEN}`,
     "",
-    "*Per-probe breakdown*",
-    perProbeLines || "_(no probes registered)_",
+    "*Needs attention*",
+    notableBlock + greenRollup,
     "",
     archivalLine,
+  ].join("\n");
+}
+
+/**
+ * Thread reply summarizing every fully-green probe in the window. One
+ * consolidated post instead of N individualized ones — green probes are
+ * uninteresting individually; the value is in seeing which probes are
+ * collectively healthy.
+ */
+export function formatAllGreenThread(greenProbes: PerProbeEntry[]): string {
+  if (greenProbes.length === 0) {
+    return ":large_green_circle: *All-green probes (0)*\n_none_";
+  }
+  const lines = greenProbes
+    .map(
+      (p) =>
+        `• 🟢 \`${p.signature}\` — ${p.passing}/${p.total} pass · p50 ${p.p50Ms}ms · p99 ${p.p99Ms}ms`
+    )
+    .join("\n");
+  return [
+    `:large_green_circle: *All-green probes (${greenProbes.length})* — no RED or YELLOW outcomes in the window`,
+    lines,
   ].join("\n");
 }
 
@@ -365,6 +472,36 @@ export function formatProbeFailureThread(probe: PerProbeEntry): string {
     mostRecentLine,
     `• Latency across all runs: p50 ${probe.p50Ms}ms · p99 ${probe.p99Ms}ms`,
     `_See the top-level \`Canary RED — …\` alerts for this signature for the full response payloads._`,
+  ].join("\n");
+}
+
+/**
+ * Thread-reply text for one YELLOW probe — same shape as the RED
+ * breakdown but worded to match the "soft signal / needs a look"
+ * semantics of YELLOW (latency anomalies, routing shifts, etc.) rather
+ * than an outright failure.
+ */
+export function formatProbeYellowThread(probe: PerProbeEntry): string {
+  const verdictMix = countMix(probe.yellowOutcomes.map((o) => o.verdict));
+  const statusMix = countMix(
+    probe.yellowOutcomes.map((o) =>
+      o.httpStatus === null ? "network error" : String(o.httpStatus)
+    )
+  );
+  const mostRecent = probe.yellowOutcomes[probe.yellowOutcomes.length - 1];
+  const mostRecentLine = mostRecent
+    ? `• Most recent YELLOW: ${new Date(mostRecent.completedAt * 1000).toISOString()} (${mostRecent.durationMs}ms)`
+    : "• Most recent YELLOW: _none recorded_";
+
+  return [
+    `🟡 *Breakdown for \`${probe.signature}\`* — ${probe.label}`,
+    `• Runs in the 24h window: ${probe.total} (one outcome per probe-runner execution)`,
+    `• Passed: ${probe.passing} · Non-pass: ${probe.failing} · YELLOW signals: ${probe.yellowing}`,
+    `• YELLOW verdicts: ${verdictMix || "_none_"}`,
+    `• HTTP statuses on YELLOW outcomes: ${statusMix || "_none_"}`,
+    mostRecentLine,
+    `• Latency across all runs: p50 ${probe.p50Ms}ms · p99 ${probe.p99Ms}ms`,
+    `_YELLOW is a soft signal — the call succeeded or degraded but not cleanly enough to be GREEN. Follow up if the pattern persists._`,
   ].join("\n");
 }
 
