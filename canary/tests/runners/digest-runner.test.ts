@@ -441,9 +441,7 @@ it("summarize filters outcomes whose signature is not in allowedSignatures", () 
   expect(summary.probesRun).toBe(1);
   expect(summary.severityCounts.GREEN).toBe(1);
   expect(summary.severityCounts.RED).toBe(0);
-  expect(summary.perProbe.map((p) => p.signature)).toEqual([
-    "v2/model/gloo-a",
-  ]);
+  expect(summary.perProbe.map((p) => p.signature)).toEqual(["v2/model/gloo-a"]);
 });
 
 it("summarize leaves all outcomes in place when allowedSignatures is null (fail-open)", () => {

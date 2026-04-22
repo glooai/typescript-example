@@ -61,7 +61,12 @@ it("reports both adds and removes in a single mixed delta, alphabetically sorted
     },
     current: {
       capturedAt: T1,
-      modelIds: ["gloo-anthropic", "gloo-google-2", "gloo-openai-5", "gloo-xai"],
+      modelIds: [
+        "gloo-anthropic",
+        "gloo-google-2",
+        "gloo-openai-5",
+        "gloo-xai",
+      ],
     },
   });
   expect(delta.hasChanges).toBe(true);

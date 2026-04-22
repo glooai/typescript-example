@@ -23,7 +23,8 @@
 
 import type { GcsClient } from "./gcs.js";
 
-export const MODEL_REGISTRY_SNAPSHOT_PATH = "state/model-registry-snapshot.json";
+export const MODEL_REGISTRY_SNAPSHOT_PATH =
+  "state/model-registry-snapshot.json";
 
 export type ModelRegistrySnapshot = {
   capturedAt: string;
