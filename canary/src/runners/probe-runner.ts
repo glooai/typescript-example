@@ -6,6 +6,11 @@
  * triggered by Cloud Scheduler on a business-hours-biased cadence:
  * every 15 min 06:00–16:45 CT (daytime) and hourly 17:00–05:00 CT
  * (nighttime) — 57 runs/day total.
+ *
+ * The runner itself is tier-agnostic — it executes whatever probe list
+ * its caller passes in. `index.ts` owns the Light-vs-Full decision via
+ * `runners/tier-decision.ts`; this module just records which tier ran
+ * so the next decision has fresh state to read.
  */
 
 import { getAccessToken } from "@glooai/scripts";
@@ -22,12 +27,15 @@ import {
 } from "../sinks/model-registry-snapshot.js";
 import {
   ACTIVE_FAILURES_PATH,
+  PROBE_TIER_STATE_PATH,
   runArtifactPath,
   type ActiveFailures,
   type GcsClient,
+  type ProbeTierState,
   type RunArtifact,
 } from "../sinks/gcs.js";
 import type { SlackClient } from "../sinks/slack.js";
+import { persistTierState, type ProbeTier } from "./tier-decision.js";
 
 export type ProbeRunnerDeps = {
   probes: Probe[];
@@ -40,6 +48,13 @@ export type ProbeRunnerDeps = {
    * RunArtifact. Omit to disable the snapshot+diff step entirely.
    */
   v2Models?: V2ModelSummary[];
+  /**
+   * Which tier produced `probes`. Threaded through so the runner can
+   * persist `lastFullSweepAt` on Full runs without the caller needing
+   * to duplicate the write path. Defaults to "full" to preserve the
+   * previous behavior of any caller that doesn't opt in.
+   */
+  tier?: ProbeTier;
 };
 
 export async function runProbes(
@@ -87,6 +102,23 @@ export async function runProbes(
   );
 
   await reconcileFailures(artifact, deps, config, now);
+
+  // Persist tier state last. Safe to run as a best-effort step — if
+  // the write fails we just fall through to "cold-start" on the next
+  // run, which is a single extra Full sweep. Better than failing the
+  // whole run over a bookkeeping blob.
+  const tier: ProbeTier = deps.tier ?? "full";
+  try {
+    const previous = await deps.gcs.readJson<ProbeTierState>(
+      PROBE_TIER_STATE_PATH
+    );
+    await persistTierState(deps.gcs, { tier, now, previous });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `probe-tier-state: persist failed (non-fatal): ${(error as Error).message}`
+    );
+  }
 
   return artifact;
 }

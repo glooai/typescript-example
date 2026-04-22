@@ -46,6 +46,29 @@ it("builds request bodies that match each routing mode", () => {
   });
 });
 
+it("passes max_tokens through when the fixture declares one", () => {
+  const capped: V2CompletionsFixture = { ...AUTO, maxTokens: 4 };
+  expect(buildRequestBody(capped)).toEqual({
+    messages: [{ role: "user", content: "hi" }],
+    auto_routing: true,
+    max_tokens: 4,
+  });
+  const cappedFamily: V2CompletionsFixture = { ...FAMILY, maxTokens: 48 };
+  expect(buildRequestBody(cappedFamily)).toEqual({
+    messages: [{ role: "user", content: "hi" }],
+    auto_routing: false,
+    model_family: "Anthropic",
+    max_tokens: 48,
+  });
+  const cappedDirect: V2CompletionsFixture = { ...DIRECT, maxTokens: 48 };
+  expect(buildRequestBody(cappedDirect)).toEqual({
+    messages: [{ role: "user", content: "hi" }],
+    auto_routing: false,
+    model: "gloo-anthropic-claude-haiku-4.5",
+    max_tokens: 48,
+  });
+});
+
 it("passes through routing metadata on GREEN responses", () => {
   const body = JSON.stringify({
     model: "gloo-anthropic-claude-haiku-4.5",

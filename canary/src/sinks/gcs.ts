@@ -4,6 +4,8 @@
  * Layout under the canary-results bucket:
  *   runs/YYYY/MM/DD/HH-<runId>.json    -- one file per probe run
  *   state/active-failures.json         -- mutable fail-signature → slack_ts map
+ *   state/probe-tier.json              -- lastFullSweepAt + lastTier (adaptive)
+ *   state/model-registry/latest.json   -- latest V2 registry snapshot
  */
 
 import { Storage } from "@google-cloud/storage";
@@ -35,6 +37,24 @@ export type ActiveFailures = {
     attempts: number;
     lastVerdict: string;
   };
+};
+
+/**
+ * Persisted state for adaptive-tier decision making. Written by the
+ * probe runner at the end of every run; read at the start of the next
+ * run to decide whether to execute a cheap "light" pulse probe or the
+ * full fan-out sweep.
+ *
+ * Only tracks the minimum the tier selector needs to reason about the
+ * steady-state case — any failure automatically forces Full via the
+ * separate `active-failures.json` blob, so we don't duplicate that
+ * signal here.
+ */
+export type ProbeTierState = {
+  /** When the most recent Full-tier sweep started (ISO-8601). */
+  lastFullSweepAt: string;
+  /** Tier chosen on the previous run — informational / debug-only. */
+  lastTier: "light" | "full";
 };
 
 export interface GcsClient {
@@ -101,3 +121,6 @@ export function runArtifactPath(runId: string, startedAt: Date): string {
 }
 
 export const ACTIVE_FAILURES_PATH = "state/active-failures.json";
+
+/** Probe-tier-state blob — used by the adaptive tier selector. */
+export const PROBE_TIER_STATE_PATH = "state/probe-tier.json";

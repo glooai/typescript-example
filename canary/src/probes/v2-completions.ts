@@ -11,6 +11,14 @@ export type V2CompletionsFixture = {
   prompt: string;
   benign: boolean;
   timeoutMs?: number;
+  /**
+   * Hard cap on response length. Passed straight through as the V2
+   * `max_tokens` request field. Set low (e.g. 4) for pulse probes where
+   * only the request succeeding matters; higher (e.g. 48) for probes
+   * that rely on the refusal detector / content inspection. Omit to
+   * fall back to the server default.
+   */
+  maxTokens?: number;
   routing:
     | { kind: "auto_routing" }
     | {
@@ -80,17 +88,31 @@ export function buildRequestBody(
   fixture: V2CompletionsFixture
 ): Record<string, unknown> {
   const messages = [{ role: "user", content: fixture.prompt }];
+  // `max_tokens` is optional per the V2 Completions API reference
+  // (.context/guides/gloo/api/completions-v2.md). Only attach it when
+  // the fixture declared one so we don't drift from the server default
+  // for any probe that hasn't opted in.
+  const tokenCap =
+    typeof fixture.maxTokens === "number"
+      ? { max_tokens: fixture.maxTokens }
+      : {};
   switch (fixture.routing.kind) {
     case "auto_routing":
-      return { messages, auto_routing: true };
+      return { messages, auto_routing: true, ...tokenCap };
     case "model_family":
       return {
         messages,
         auto_routing: false,
         model_family: fixture.routing.family,
+        ...tokenCap,
       };
     case "model":
-      return { messages, auto_routing: false, model: fixture.routing.model };
+      return {
+        messages,
+        auto_routing: false,
+        model: fixture.routing.model,
+        ...tokenCap,
+      };
   }
 }
 
