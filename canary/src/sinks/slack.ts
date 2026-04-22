@@ -4,7 +4,11 @@
  * Posting rules (enforced by the runners, not this module):
  *   - New RED failures: top-level `chat.postMessage` (returns ts)
  *   - Recurring RED failures: threaded reply to the original ts
- *   - Recovery: threaded reply ("✅ recovered") + `reactions.add` white_check_mark
+ *   - Recovery: threaded reply ("✅ recovered") + `reactions.add`
+ *     white_check_mark on the original top-level ts + `chat.update`
+ *     on the top-level post prefixing ":white_check_mark: *Recovered*"
+ *     so the closure is legible from the channel overview without
+ *     needing to open the thread.
  *   - Daily digest: top-level post; YELLOW signals threaded onto it
  */
 
@@ -19,9 +23,16 @@ export type SlackPostResult = {
   channel: string;
 };
 
+export type SlackUpdateArgs = {
+  ts: string;
+  text: string;
+  blocks?: unknown[];
+};
+
 export interface SlackClient {
   post(args: SlackPostArgs): Promise<SlackPostResult>;
   react(ts: string, emoji: string): Promise<void>;
+  update(args: SlackUpdateArgs): Promise<void>;
 }
 
 const BASE = "https://slack.com/api";
@@ -87,6 +98,28 @@ export function createSlackClient(
         throw new Error(
           `Slack reactions.add failed: ${body.error ?? "unknown"}`
         );
+      }
+    },
+
+    async update({ ts, text, blocks }: SlackUpdateArgs): Promise<void> {
+      const res = await fetchImpl(`${BASE}/chat.update`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          Authorization: `Bearer ${botToken}`,
+        },
+        body: JSON.stringify({
+          channel: channelId,
+          ts,
+          text,
+          blocks,
+          unfurl_links: false,
+          unfurl_media: false,
+        }),
+      });
+      const body = (await res.json()) as { ok: boolean; error?: string };
+      if (!body.ok) {
+        throw new Error(`Slack chat.update failed: ${body.error ?? "unknown"}`);
       }
     },
   };

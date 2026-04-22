@@ -23,12 +23,21 @@ export type V2CompletionsFixture = {
     | { kind: "auto_routing" }
     | {
         kind: "model_family";
-        // Accepted values per the V2 Completions API error response:
-        // "Anthropic, Google, OpenAI, Open Source (case-insensitive)".
-        // We pin the exact server-canonical casing so any change the
-        // platform makes to the accepted values list surfaces as a
-        // canary RED immediately.
-        family: "Anthropic" | "Google" | "OpenAI" | "Open Source";
+        // Family string is typed `string` so the probe list can be
+        // hydrated directly from the live `/platform/v2/models`
+        // registry (distinct `family` values). That way a new family
+        // ("Mistral", "xAI", …) starts getting probed the same minute
+        // it shows up in the registry, and a retired family stops
+        // getting probed the same minute it disappears — same
+        // no-drift property the direct-model probes already have.
+        //
+        // The V2 Completions API validates case-insensitively against
+        // the currently-accepted list and returns the canonical
+        // casing (e.g. "Open Source" not "open source"). Feeding the
+        // registry's canonical casing through verbatim keeps the
+        // request body in lock-step with whatever the platform
+        // currently accepts.
+        family: string;
       }
     | { kind: "model"; model: string };
 };

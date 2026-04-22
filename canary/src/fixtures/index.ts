@@ -2,23 +2,26 @@
  * Probe fixtures — the surface area we're fuzzing. Each fixture becomes one
  * Probe instance. Extend this file (not the runner) to add coverage.
  *
- * Source of truth for V2 direct-model aliases: the live unauthenticated
- * endpoint
+ * Source of truth for V2 direct-model aliases AND family routing values:
+ * the live unauthenticated endpoint
  *   GET https://platform.ai.gloo.com/platform/v2/models
  *
  * That's the same data feed the public supported-models docs page renders
  * from (see `TangoGroup/gloo#2049` — Mintlify was switched to pull from
  * this endpoint dynamically so docs can't drift from the platform registry
  * again). Hydrating the probe list at run time — instead of keeping a
- * checked-in mirror — means the canary can never drift either. Retired
+ * checked-in mirror — means the canary can never drift either: retired
  * models disappear from our probes the same minute they disappear from
- * the registry.
+ * the registry, and new families start getting probed the same minute
+ * they first show up.
  *
  * Scope:
  *   - V2 Completions is the actively supported surface. We probe every
  *     direct-model alias returned by the live registry PLUS every
- *     routing mode (auto_routing + 4 model_family values). The routing
- *     modes aren't model-specific, so they stay statically declared here.
+ *     routing mode the router exposes. `auto_routing` is a single
+ *     static fixture (it's a boolean flag, not a family). The
+ *     `model_family` probes are derived dynamically from the distinct
+ *     `family` values in the registry.
  *   - V1 Messages is deprecated and maintained for backwards-compat only.
  *     Per Gloo platform team (2026-04-21 triage thread, CC Elio Kazu
  *     Mostero + Jackson Southern): V1 has no cross-provider retry chain
@@ -80,58 +83,18 @@ const V2_LIGHT_PROBE_MAX_TOKENS = 4;
 export const V1_FIXTURES: V1MessagesFixture[] = [];
 
 /**
- * Routing-mode probes — one per mechanism the V2 router exposes.
- * `auto_routing: true` and `model_family=<one-of-four>` are not tied to
- * any specific model id, so they stay statically declared and are not
- * hydrated from `/platform/v2/models`.
- *
- * Keep the `family` string exactly the casing the server canonicalizes
- * to ("Anthropic" | "Google" | "OpenAI" | "Open Source") — if the
- * platform changes the accepted values, that's a breaking contract
- * change we want to surface as a canary RED immediately.
+ * `auto_routing: true` isn't tied to any specific model or family, so
+ * it's declared statically. If the platform ever removes auto_routing
+ * as a mechanism, this probe turning RED is the signal.
  */
-export const V2_ROUTING_FIXTURES: V2CompletionsFixture[] = [
-  {
-    signature: "v2/auto_routing",
-    label: "V2 · auto_routing",
-    prompt: BENIGN_PROMPT,
-    benign: true,
-    maxTokens: V2_FULL_PROBE_MAX_TOKENS,
-    routing: { kind: "auto_routing" },
-  },
-  {
-    signature: "v2/family/anthropic",
-    label: "V2 · model_family=Anthropic",
-    prompt: BENIGN_PROMPT,
-    benign: true,
-    maxTokens: V2_FULL_PROBE_MAX_TOKENS,
-    routing: { kind: "model_family", family: "Anthropic" },
-  },
-  {
-    signature: "v2/family/openai",
-    label: "V2 · model_family=OpenAI",
-    prompt: BENIGN_PROMPT,
-    benign: true,
-    maxTokens: V2_FULL_PROBE_MAX_TOKENS,
-    routing: { kind: "model_family", family: "OpenAI" },
-  },
-  {
-    signature: "v2/family/google",
-    label: "V2 · model_family=Google",
-    prompt: BENIGN_PROMPT,
-    benign: true,
-    maxTokens: V2_FULL_PROBE_MAX_TOKENS,
-    routing: { kind: "model_family", family: "Google" },
-  },
-  {
-    signature: "v2/family/open-source",
-    label: "V2 · model_family=Open Source",
-    prompt: BENIGN_PROMPT,
-    benign: true,
-    maxTokens: V2_FULL_PROBE_MAX_TOKENS,
-    routing: { kind: "model_family", family: "Open Source" },
-  },
-];
+export const V2_AUTO_ROUTING_FIXTURE: V2CompletionsFixture = {
+  signature: "v2/auto_routing",
+  label: "V2 · auto_routing",
+  prompt: BENIGN_PROMPT,
+  benign: true,
+  maxTokens: V2_FULL_PROBE_MAX_TOKENS,
+  routing: { kind: "auto_routing" },
+};
 
 /**
  * Light-tier "pulse" fixture. Exactly one probe, fired on the every-15-min
@@ -162,6 +125,77 @@ export const V2_LIGHT_PULSE_FIXTURE: V2CompletionsFixture = {
   maxTokens: V2_LIGHT_PROBE_MAX_TOKENS,
   routing: { kind: "auto_routing" },
 };
+
+/**
+ * Canonical slug form of a family name for probe signatures. Always
+ * lowercase, spaces to hyphens — "Open Source" → "open-source". Stable
+ * as long as the registry keeps the same family names, and deterministic
+ * without needing a manual mapping table.
+ */
+export function familySlug(family: string): string {
+  return family.trim().toLowerCase().replace(/\s+/g, "-");
+}
+
+/**
+ * Distinct family names present in a V2 models response. Output is
+ * sorted for stable Slack/stdout ordering and de-duped. Pulls the
+ * canonical casing straight from the registry — so the fixture's
+ * `model_family` request body stays in lock-step with whatever the
+ * server currently accepts, even if Gloo adjusts casing over time.
+ */
+export function extractFamilies(models: V2ModelSummary[]): string[] {
+  const set = new Set<string>();
+  for (const m of models) {
+    if (m.family && m.family.trim().length > 0) {
+      set.add(m.family);
+    }
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Build one `model_family=<family>` fixture per distinct family in the
+ * registry. Previously this list was hardcoded to {Anthropic, Google,
+ * OpenAI, Open Source} — the current registry values at the time the
+ * canary was written. Hardcoding meant a new family (e.g. "Mistral",
+ * "xAI") would be silently skipped until somebody manually updated the
+ * fixture list. Deriving from the registry closes that gap.
+ *
+ * Signatures use `familySlug()` so Slack + digest output keep the
+ * same slugs ("v2/family/anthropic", "v2/family/open-source") we had
+ * before. Labels use the canonical casing for human readability.
+ */
+export function buildV2FamilyFixtures(
+  families: string[]
+): V2CompletionsFixture[] {
+  return families
+    .slice()
+    .sort((a, b) => a.localeCompare(b))
+    .map(
+      (family): V2CompletionsFixture => ({
+        signature: `v2/family/${familySlug(family)}`,
+        label: `V2 · model_family=${family}`,
+        prompt: BENIGN_PROMPT,
+        benign: true,
+        maxTokens: V2_FULL_PROBE_MAX_TOKENS,
+        routing: { kind: "model_family", family },
+      })
+    );
+}
+
+/**
+ * Build the Full-tier routing fixtures from a models response.
+ * `auto_routing` is always present; `model_family` fixtures are
+ * derived from the distinct `family` values in the registry.
+ */
+export function buildV2RoutingFixtures(
+  models: V2ModelSummary[]
+): V2CompletionsFixture[] {
+  return [
+    V2_AUTO_ROUTING_FIXTURE,
+    ...buildV2FamilyFixtures(extractFamilies(models)),
+  ];
+}
 
 /**
  * Build one direct-model fixture per entry in a V2 models response.
@@ -197,31 +231,53 @@ export type BuildV2FixturesDeps = {
 };
 
 /**
- * Routing-mode probes + one direct-model probe per model currently listed
- * in the authoritative registry. Async because the model list is fetched
- * live on every probe-runner invocation.
+ * Routing-mode probes (auto_routing + 1 per distinct family in the
+ * registry) + one direct-model probe per model in the registry. Async
+ * because the whole list is hydrated live on every Full-tier run.
  */
 export async function buildV2Fixtures(
   deps: BuildV2FixturesDeps = {}
 ): Promise<V2CompletionsFixture[]> {
   const loadModels = deps.loadModels ?? (() => fetchV2Models());
   const models = await loadModels();
-  return [...V2_ROUTING_FIXTURES, ...buildV2DirectModelFixtures(models)];
+  return [
+    ...buildV2RoutingFixtures(models),
+    ...buildV2DirectModelFixtures(models),
+  ];
 }
 
 /**
- * Signatures the canary is *currently* intended to probe given a list of
- * live model ids. Includes V1 (currently empty), routing-mode (5 static),
- * and one `v2/model/<id>` per live model. The digest uses this to filter
- * archived outcomes for signatures that are no longer in the probe set —
- * e.g., retired-from-registry aliases whose old runs still sit in the
- * 24h window. One definition, one call site, no drift between the probe
- * build path and the digest filter path.
+ * Signatures the canary is *currently* intended to probe given a
+ * snapshot of the live registry. Includes V1 (currently empty),
+ * the light-pulse signature, `v2/auto_routing`, one
+ * `v2/family/<slug>` per distinct family, and one `v2/model/<id>`
+ * per model. The digest uses this to filter archived outcomes for
+ * signatures that are no longer in the probe set — e.g.,
+ * retired-from-registry aliases or families whose old runs still
+ * sit in the 24h window. One definition, one call site, no drift
+ * between the probe build path and the digest filter path.
+ *
+ * Takes `modelIds` + `families` (rather than the fuller
+ * `V2ModelSummary[]`) so the digest can call it directly with the
+ * GCS snapshot blob, which only stores those two fields. `families`
+ * is optional to tolerate older snapshots written before the field
+ * was added — callers pass `undefined` (or omit it) and the family
+ * slice returns empty, so the digest fall-open behavior for legacy
+ * snapshots is preserved.
  */
-export function currentProbeSignatures(modelIds: string[]): string[] {
+export function currentProbeSignatures(
+  modelIds: string[],
+  families: string[] = []
+): string[] {
   const v1 = V1_FIXTURES.map((f) => f.signature);
   const light = [V2_LIGHT_PULSE_FIXTURE.signature];
-  const routing = V2_ROUTING_FIXTURES.map((f) => f.signature);
+  const routing = [
+    V2_AUTO_ROUTING_FIXTURE.signature,
+    ...families
+      .slice()
+      .sort((a, b) => a.localeCompare(b))
+      .map((f) => `v2/family/${familySlug(f)}`),
+  ];
   const direct = modelIds.map((id) => `v2/model/${id}`);
   return [...v1, ...light, ...routing, ...direct];
 }

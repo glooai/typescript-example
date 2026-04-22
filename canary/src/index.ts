@@ -25,7 +25,7 @@ import {
   V1_FIXTURES,
   V2_LIGHT_PULSE_FIXTURE,
   buildV2DirectModelFixtures,
-  V2_ROUTING_FIXTURES,
+  buildV2RoutingFixtures,
 } from "./fixtures/index.js";
 import { fetchV2Models } from "./fixtures/v2-models.js";
 import { runProbes } from "./runners/probe-runner.js";
@@ -92,7 +92,7 @@ export async function main(): Promise<void> {
     // + diff pipeline.
     const v2Models = await fetchV2Models();
     const v2Fixtures = [
-      ...V2_ROUTING_FIXTURES,
+      ...buildV2RoutingFixtures(v2Models),
       ...buildV2DirectModelFixtures(v2Models),
     ];
     const probes = [

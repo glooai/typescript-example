@@ -70,6 +70,9 @@ function fakeSlack(): SlackClient & {
     async react() {
       // no-op for tests
     },
+    async update() {
+      // no-op for tests
+    },
   };
 }
 
