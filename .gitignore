@@ -21,3 +21,6 @@ pr.md
 *.tfstate.*
 *.tfvars
 !*.auto.tfvars.example
+# Local plan binaries produced by `terraform plan -out=...` — never commit.
+tfplan.bin
+*.tfplan
