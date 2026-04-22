@@ -1,9 +1,14 @@
 /**
  * Cloud Scheduler jobs that fire the Cloud Run Jobs on the cron windows
  * Patrick specified:
- *   - probe  — every 4h starting 6am CT → 6 runs/day
- *   - digest — daily at 6:05am CT (right after the first probe of the day
- *              so the digest's 24h window includes fresh data)
+ *   - probe (daytime)   — every 15 min 06:00–16:45 CT → 44 runs/day
+ *   - probe (nighttime) — top-of-hour 17:00–05:00 CT  → 13 runs/day
+ *   - digest            — daily at 06:05 CT (right after the first daytime
+ *                         probe, so the 24h digest sees fresh data)
+ *
+ * Two scheduler jobs (daytime + nighttime) are cheaper than a minute-level
+ * cron fired 1,440 times/day and gated in-code, and still stay within the
+ * Cloud Scheduler free tier (3 jobs/account/month) alongside the digest.
  *
  * Authentication: Scheduler uses its own service account with
  * `roles/run.invoker` scoped just to the target job.
@@ -31,12 +36,38 @@ resource "google_cloud_run_v2_job_iam_member" "scheduler_invoke_digest" {
   member   = "serviceAccount:${google_service_account.scheduler_invoker.email}"
 }
 
-resource "google_cloud_scheduler_job" "canary_probe" {
-  name        = "canary-probe-every-4h"
-  description = "Fire canary-probe Cloud Run Job every 4h starting 06:00 CT."
+resource "google_cloud_scheduler_job" "canary_probe_daytime" {
+  name        = "canary-probe-daytime-15m"
+  description = "Fire canary-probe Cloud Run Job every 15 min from 06:00–16:45 CT."
   project     = var.project_id
   region      = var.region
-  schedule    = var.probe_schedule_cron
+  schedule    = var.probe_daytime_schedule_cron
+  time_zone   = var.schedule_timezone
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${google_cloud_run_v2_job.canary_probe.name}:run"
+
+    oauth_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+    }
+  }
+
+  # retry_count = 0 keeps invocations minimal — the probe itself tolerates
+  # transient failures via in-process per-probe try/catch, and the next
+  # scheduled run (15 min out in daytime, 1h in nighttime) is our real
+  # retry. Paying for retries on top of that is double-billing.
+  retry_config {
+    retry_count = 0
+  }
+}
+
+resource "google_cloud_scheduler_job" "canary_probe_nighttime" {
+  name        = "canary-probe-nighttime-1h"
+  description = "Fire canary-probe Cloud Run Job hourly from 17:00–05:00 CT."
+  project     = var.project_id
+  region      = var.region
+  schedule    = var.probe_nighttime_schedule_cron
   time_zone   = var.schedule_timezone
 
   http_target {
@@ -49,7 +80,7 @@ resource "google_cloud_scheduler_job" "canary_probe" {
   }
 
   retry_config {
-    retry_count = 1
+    retry_count = 0
   }
 }
 
