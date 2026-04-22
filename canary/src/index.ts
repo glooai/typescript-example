@@ -10,7 +10,12 @@ import { createGcsClient } from "./sinks/gcs.js";
 import { createSlackClient } from "./sinks/slack.js";
 import { buildV1Probe } from "./probes/v1-messages.js";
 import { buildV2Probe } from "./probes/v2-completions.js";
-import { V1_FIXTURES, V2_FIXTURES } from "./fixtures/index.js";
+import {
+  V1_FIXTURES,
+  buildV2DirectModelFixtures,
+  V2_ROUTING_FIXTURES,
+} from "./fixtures/index.js";
+import { fetchV2Models } from "./fixtures/v2-models.js";
 import { runProbes } from "./runners/probe-runner.js";
 import { runDigest } from "./runners/digest-runner.js";
 
@@ -23,11 +28,31 @@ export async function main(): Promise<void> {
   );
 
   if (config.mode === "probe") {
+    // Hydrate the V2 probe list from the authoritative model registry on
+    // every run — if `/platform/v2/models` is unreachable this throws and
+    // the job exits non-zero, which is the correct behavior: a canary
+    // running zero direct-model probes is strictly less useful than one
+    // that fails loudly and surfaces the outage in Cloud Run logs.
+    //
+    // Fetch ONCE, then fan the same list out to both (a) the probe-fixture
+    // builder and (b) the GCS-backed registry-snapshot + diff pipeline.
+    // Avoids a second round-trip to /platform/v2/models on every run.
+    const v2Models = await fetchV2Models();
+    const v2Fixtures = [
+      ...V2_ROUTING_FIXTURES,
+      ...buildV2DirectModelFixtures(v2Models),
+    ];
     const probes = [
       ...V1_FIXTURES.map(buildV1Probe),
-      ...V2_FIXTURES.map(buildV2Probe),
+      ...v2Fixtures.map(buildV2Probe),
     ];
-    const artifact = await runProbes(config, { probes, gcs, slack });
+
+    const artifact = await runProbes(config, {
+      probes,
+      gcs,
+      slack,
+      v2Models,
+    });
     // eslint-disable-next-line no-console
     console.log(
       JSON.stringify({
@@ -36,6 +61,13 @@ export async function main(): Promise<void> {
         runId: artifact.runId,
         outcomes: artifact.outcomes.length,
         red: artifact.outcomes.filter((o) => o.severity === "RED").length,
+        registryDelta: artifact.registryDelta
+          ? {
+              added: artifact.registryDelta.added.length,
+              removed: artifact.registryDelta.removed.length,
+              isFirstSnapshot: artifact.registryDelta.isFirstSnapshot,
+            }
+          : null,
       })
     );
     return;

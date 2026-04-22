@@ -2,18 +2,23 @@
  * Probe fixtures — the surface area we're fuzzing. Each fixture becomes one
  * Probe instance. Extend this file (not the runner) to add coverage.
  *
- * Source of truth for V2 model IDs: the live, unauthenticated endpoint
+ * Source of truth for V2 direct-model aliases: the live unauthenticated
+ * endpoint
  *   GET https://platform.ai.gloo.com/platform/v2/models
  *
  * That's the same data feed the public supported-models docs page renders
  * from (see `TangoGroup/gloo#2049` — Mintlify was switched to pull from
  * this endpoint dynamically so docs can't drift from the platform registry
- * again).
+ * again). Hydrating the probe list at run time — instead of keeping a
+ * checked-in mirror — means the canary can never drift either. Retired
+ * models disappear from our probes the same minute they disappear from
+ * the registry.
  *
  * Scope:
  *   - V2 Completions is the actively supported surface. We probe every
- *     direct-model alias in the authoritative list + every routing mode
- *     (auto_routing + 4 model_family values).
+ *     direct-model alias returned by the live registry PLUS every
+ *     routing mode (auto_routing + 4 model_family values). The routing
+ *     modes aren't model-specific, so they stay statically declared here.
  *   - V1 Messages is deprecated and maintained for backwards-compat only.
  *     Per Gloo platform team (2026-04-21 triage thread, CC Elio Kazu
  *     Mostero + Jackson Southern): V1 has no cross-provider retry chain
@@ -26,6 +31,7 @@
 
 import type { V1MessagesFixture } from "../probes/v1-messages.js";
 import type { V2CompletionsFixture } from "../probes/v2-completions.js";
+import { fetchV2Models, type V2ModelSummary } from "./v2-models.js";
 
 // Benign tech-writing prompt — matches the refusal-regression pattern we
 // want to keep detecting (see scripts/tests/completions-v2-moderation for
@@ -33,6 +39,12 @@ import type { V2CompletionsFixture } from "../probes/v2-completions.js";
 // per-probe latency low.
 const BENIGN_PROMPT =
   "In one sentence, what are three best practices for clear technical writing?";
+
+// Some models (GPT-5.2 Pro, Opus 4.6, DeepSeek R1 with reasoning) can run
+// longer than the default 90s — give every direct-model probe 120s so the
+// per-probe timeout isn't the bottleneck. Probes still run sequentially so
+// the whole batch completes well under the 600s job timeout.
+const V2_DIRECT_PROBE_TIMEOUT_MS = 120_000;
 
 /**
  * V1 Messages probes are intentionally empty. V1 is deprecated by design
@@ -46,141 +58,17 @@ const BENIGN_PROMPT =
 export const V1_FIXTURES: V1MessagesFixture[] = [];
 
 /**
- * Every currently-supported V2 direct-model alias per the authoritative
- * endpoint. Ordered alphabetically within family (Anthropic, Google,
- * Open Source, OpenAI) so the Slack digest stays scannable. Keep this
- * list in lockstep with `/platform/v2/models`; if Gloo adds or removes a
- * model, update here in the same PR that touches the platform.
+ * Routing-mode probes — one per mechanism the V2 router exposes.
+ * `auto_routing: true` and `model_family=<one-of-four>` are not tied to
+ * any specific model id, so they stay statically declared and are not
+ * hydrated from `/platform/v2/models`.
+ *
+ * Keep the `family` string exactly the casing the server canonicalizes
+ * to ("Anthropic" | "Google" | "OpenAI" | "Open Source") — if the
+ * platform changes the accepted values, that's a breaking contract
+ * change we want to surface as a canary RED immediately.
  */
-const V2_DIRECT_MODELS: Array<{
-  signature: string;
-  model: string;
-  label: string;
-}> = [
-  // Anthropic
-  {
-    signature: "v2/model/anthropic-haiku-4.5",
-    model: "gloo-anthropic-claude-haiku-4.5",
-    label: "V2 · Claude Haiku 4.5",
-  },
-  {
-    signature: "v2/model/anthropic-opus-4.5",
-    model: "gloo-anthropic-claude-opus-4.5",
-    label: "V2 · Claude Opus 4.5",
-  },
-  {
-    signature: "v2/model/anthropic-opus-4.6",
-    model: "gloo-anthropic-claude-opus-4.6",
-    label: "V2 · Claude Opus 4.6",
-  },
-  {
-    signature: "v2/model/anthropic-sonnet-4",
-    model: "gloo-anthropic-claude-sonnet-4",
-    label: "V2 · Claude Sonnet 4",
-  },
-  {
-    signature: "v2/model/anthropic-sonnet-4.5",
-    model: "gloo-anthropic-claude-sonnet-4.5",
-    label: "V2 · Claude Sonnet 4.5",
-  },
-  {
-    signature: "v2/model/anthropic-sonnet-4.6",
-    model: "gloo-anthropic-claude-sonnet-4.6",
-    label: "V2 · Claude Sonnet 4.6",
-  },
-  // Google
-  {
-    signature: "v2/model/google-gemini-2.5-flash",
-    model: "gloo-google-gemini-2.5-flash",
-    label: "V2 · Gemini 2.5 Flash",
-  },
-  {
-    signature: "v2/model/google-gemini-2.5-flash-lite",
-    model: "gloo-google-gemini-2.5-flash-lite",
-    label: "V2 · Gemini 2.5 Flash Lite",
-  },
-  {
-    signature: "v2/model/google-gemini-2.5-pro",
-    model: "gloo-google-gemini-2.5-pro",
-    label: "V2 · Gemini 2.5 Pro",
-  },
-  // Open source
-  {
-    signature: "v2/model/oss-deepseek-v3.1",
-    model: "gloo-deepseek-chat-v3.1",
-    label: "V2 · DeepSeek Chat V3.1",
-  },
-  {
-    signature: "v2/model/oss-deepseek-v3.2",
-    model: "gloo-deepseek-v3.2",
-    label: "V2 · DeepSeek V3.2",
-  },
-  {
-    signature: "v2/model/oss-deepseek-r1",
-    model: "gloo-deepseek-r1",
-    label: "V2 · DeepSeek R1",
-  },
-  {
-    signature: "v2/model/oss-gpt-oss-120b",
-    model: "gloo-openai-gpt-oss-120b",
-    label: "V2 · GPT OSS 120B",
-  },
-  {
-    signature: "v2/model/oss-llama-3.1-8b",
-    model: "gloo-meta-llama-3.1-8b-instruct",
-    label: "V2 · Llama 3.1 8B Instruct",
-  },
-  {
-    signature: "v2/model/oss-llama-4-maverick",
-    model: "gloo-meta-llama-4-maverick",
-    label: "V2 · Llama 4 Maverick",
-  },
-  // OpenAI
-  {
-    signature: "v2/model/openai-gpt-4.1",
-    model: "gloo-openai-gpt-4.1",
-    label: "V2 · GPT-4.1",
-  },
-  {
-    signature: "v2/model/openai-gpt-4.1-mini",
-    model: "gloo-openai-gpt-4.1-mini",
-    label: "V2 · GPT-4.1 Mini",
-  },
-  {
-    signature: "v2/model/openai-gpt-5-mini",
-    model: "gloo-openai-gpt-5-mini",
-    label: "V2 · GPT-5 Mini",
-  },
-  {
-    signature: "v2/model/openai-gpt-5-nano",
-    model: "gloo-openai-gpt-5-nano",
-    label: "V2 · GPT-5 Nano",
-  },
-  {
-    signature: "v2/model/openai-gpt-5.2",
-    model: "gloo-openai-gpt-5.2",
-    label: "V2 · GPT-5.2",
-  },
-  {
-    signature: "v2/model/openai-gpt-5.2-pro",
-    model: "gloo-openai-gpt-5.2-pro",
-    label: "V2 · GPT-5.2 Pro",
-  },
-  {
-    signature: "v2/model/openai-gpt-5.4",
-    model: "gloo-openai-gpt-5.4",
-    label: "V2 · GPT-5.4",
-  },
-];
-
-// Some models (GPT-5.2 Pro, Opus 4.6, DeepSeek R1 with reasoning) can run
-// longer than the default 90s — give every direct-model probe 120s so the
-// per-probe timeout isn't the bottleneck. Probes still run sequentially so
-// the whole batch completes well under the 600s job timeout.
-const V2_DIRECT_PROBE_TIMEOUT_MS = 120_000;
-
-export const V2_FIXTURES: V2CompletionsFixture[] = [
-  // --- Routing-mode probes: one per mechanism ---
+export const V2_ROUTING_FIXTURES: V2CompletionsFixture[] = [
   {
     signature: "v2/auto_routing",
     label: "V2 · auto_routing",
@@ -216,15 +104,65 @@ export const V2_FIXTURES: V2CompletionsFixture[] = [
     benign: true,
     routing: { kind: "model_family", family: "Open Source" },
   },
-  // --- Direct-model probes: one per supported alias ---
-  ...V2_DIRECT_MODELS.map(
-    ({ signature, model, label }): V2CompletionsFixture => ({
-      signature,
-      label,
-      prompt: BENIGN_PROMPT,
-      benign: true,
-      timeoutMs: V2_DIRECT_PROBE_TIMEOUT_MS,
-      routing: { kind: "model", model },
-    })
-  ),
 ];
+
+/**
+ * Build one direct-model fixture per entry in a V2 models response.
+ *
+ * Signatures are derived deterministically from the model id — `v2/model/<id>`
+ * — so they stay stable as long as the platform keeps the id stable, and
+ * so we never need a manual slug-mapping table. Labels come straight from
+ * the registry's `name` field, which is the same string the Studio Model
+ * Explorer shows.
+ */
+export function buildV2DirectModelFixtures(
+  models: V2ModelSummary[]
+): V2CompletionsFixture[] {
+  return models
+    .slice()
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map(
+      (model): V2CompletionsFixture => ({
+        signature: `v2/model/${model.id}`,
+        label: `V2 · ${model.name}`,
+        prompt: BENIGN_PROMPT,
+        benign: true,
+        timeoutMs: V2_DIRECT_PROBE_TIMEOUT_MS,
+        routing: { kind: "model", model: model.id },
+      })
+    );
+}
+
+export type BuildV2FixturesDeps = {
+  /** Injectable for tests — defaults to the live `/platform/v2/models` fetch. */
+  loadModels?: () => Promise<V2ModelSummary[]>;
+};
+
+/**
+ * Routing-mode probes + one direct-model probe per model currently listed
+ * in the authoritative registry. Async because the model list is fetched
+ * live on every probe-runner invocation.
+ */
+export async function buildV2Fixtures(
+  deps: BuildV2FixturesDeps = {}
+): Promise<V2CompletionsFixture[]> {
+  const loadModels = deps.loadModels ?? (() => fetchV2Models());
+  const models = await loadModels();
+  return [...V2_ROUTING_FIXTURES, ...buildV2DirectModelFixtures(models)];
+}
+
+/**
+ * Signatures the canary is *currently* intended to probe given a list of
+ * live model ids. Includes V1 (currently empty), routing-mode (5 static),
+ * and one `v2/model/<id>` per live model. The digest uses this to filter
+ * archived outcomes for signatures that are no longer in the probe set —
+ * e.g., retired-from-registry aliases whose old runs still sit in the
+ * 24h window. One definition, one call site, no drift between the probe
+ * build path and the digest filter path.
+ */
+export function currentProbeSignatures(modelIds: string[]): string[] {
+  const v1 = V1_FIXTURES.map((f) => f.signature);
+  const routing = V2_ROUTING_FIXTURES.map((f) => f.signature);
+  const direct = modelIds.map((id) => `v2/model/${id}`);
+  return [...v1, ...routing, ...direct];
+}

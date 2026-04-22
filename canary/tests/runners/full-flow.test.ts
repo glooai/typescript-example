@@ -216,15 +216,19 @@ it("gatherArchivalState reports object count, bytes, and oldest age", async () =
   expect(state.oldestAgeDays).toBeGreaterThanOrEqual(19);
 });
 
-it("runDigest composes a summary, posts top-level, and threads YELLOW notes", async () => {
+it("runDigest posts individualized YELLOW threads instead of a batch insights post", async () => {
+  // One probe with both a green outcome and a yellow outcome — the probe
+  // rolls up to worstSeverity=YELLOW and gets an individualized thread.
+  // One probe with a single green outcome — rolls up into the all-green
+  // thread post.
   const artifactA: RunArtifact = {
     runId: "run-a",
     startedAt: "2026-04-20T06:00:00Z",
     completedAt: "2026-04-20T06:00:30Z",
     outcomes: [
       {
-        signature: "v2/auto",
-        label: "V2 · auto",
+        signature: "v2/slow",
+        label: "V2 · slow",
         endpoint: "u",
         apiVersion: "v2",
         httpStatus: 200,
@@ -235,8 +239,8 @@ it("runDigest composes a summary, posts top-level, and threads YELLOW notes", as
         completedAt: 1700000000,
       },
       {
-        signature: "v2/auto",
-        label: "V2 · auto",
+        signature: "v2/slow",
+        label: "V2 · slow",
         endpoint: "u",
         apiVersion: "v2",
         httpStatus: 200,
@@ -245,6 +249,18 @@ it("runDigest composes a summary, posts top-level, and threads YELLOW notes", as
         durationMs: 9500,
         details: { note: "latency spike" },
         completedAt: 1700000000,
+      },
+      {
+        signature: "v2/fast",
+        label: "V2 · fast",
+        endpoint: "u",
+        apiVersion: "v2",
+        httpStatus: 200,
+        verdict: "PASS",
+        severity: "GREEN",
+        durationMs: 400,
+        details: {},
+        completedAt: 1700000050,
       },
     ],
   };
@@ -261,17 +277,29 @@ it("runDigest composes a summary, posts top-level, and threads YELLOW notes", as
     new Date("2026-04-20T18:00:00Z")
   );
 
-  expect(summary.probesRun).toBe(2);
+  expect(summary.probesRun).toBe(3);
   expect(summary.severityCounts.YELLOW).toBe(1);
 
-  // 2 posts: the top-level digest + the yellow-notes thread reply
-  expect(slack.posts).toHaveLength(2);
+  // 3 posts: top-level + all-green roll-up + YELLOW individualized breakdown
+  expect(slack.posts).toHaveLength(3);
   expect(slack.posts[0].threadTs).toBeUndefined();
-  expect(slack.posts[1].threadTs).toBeDefined();
-  expect(slack.posts[1].text).toContain("Secondary insights");
+
+  // Top-level surfaces v2/slow as the yellow probe, hides v2/fast.
+  expect(slack.posts[0].text).toMatch(/• 🟡 `v2\/slow`/);
+  expect(slack.posts[0].text).not.toMatch(/`v2\/fast`/);
+  expect(slack.posts[0].text).toContain("🟢 1 probe fully green");
+
+  // Threaded replies: one all-green roll-up and one yellow breakdown.
+  const greenThread = slack.posts[1];
+  const yellowThread = slack.posts[2];
+  expect(greenThread.threadTs).toBeDefined();
+  expect(greenThread.text).toContain("All-green probes (1)");
+  expect(greenThread.text).toContain("🟢 `v2/fast`");
+  expect(yellowThread.threadTs).toBe(greenThread.threadTs);
+  expect(yellowThread.text).toContain("*Breakdown for `v2/slow`*");
 });
 
-it("runDigest skips the YELLOW thread when there are no yellow notes", async () => {
+it("runDigest posts a single all-green thread reply when every probe is GREEN", async () => {
   const artifact: RunArtifact = {
     runId: "r",
     startedAt: "2026-04-20T06:00:00Z",
@@ -299,13 +327,16 @@ it("runDigest skips the YELLOW thread when there are no yellow notes", async () 
   const slack = fakeSlack();
 
   await runDigest(CONFIG, { gcs, slack }, new Date("2026-04-20T18:00:00Z"));
-  expect(slack.posts).toHaveLength(1);
+  // Top-level post + single all-green roll-up in thread.
+  expect(slack.posts).toHaveLength(2);
+  expect(slack.posts[0].text).toContain("All probes fully green");
+  expect(slack.posts[1].threadTs).toBeDefined();
+  expect(slack.posts[1].text).toContain("All-green probes (1)");
 });
 
-it("runDigest posts one threaded breakdown per red probe", async () => {
+it("runDigest posts one individualized threaded breakdown per red probe and rolls greens up", async () => {
   // Two failing probes (v1/bad and v2/meh) plus one passing probe.
-  // We expect exactly 3 slack.post calls: the top-level digest plus
-  // one threaded reply per failing probe. No YELLOW thread this run.
+  // We expect: top-level + all-green thread (for v2/auto) + 2 RED threads.
   const artifact: RunArtifact = {
     runId: "r",
     startedAt: "2026-04-20T06:00:00Z",
@@ -358,21 +389,399 @@ it("runDigest posts one threaded breakdown per red probe", async () => {
 
   await runDigest(CONFIG, { gcs, slack }, new Date("2026-04-20T18:00:00Z"));
 
-  // 1 top-level + 2 thread replies (one per failing probe). No
-  // yellow-notes thread because all failing outcomes are RED.
-  expect(slack.posts).toHaveLength(3);
+  // 1 top-level + 1 all-green thread + 2 RED thread replies.
+  expect(slack.posts).toHaveLength(4);
   expect(slack.posts[0].threadTs).toBeUndefined();
   expect(slack.posts[0].text).toContain("🔴 `v1/bad`");
   expect(slack.posts[0].text).toContain("🔴 `v2/meh`");
-  expect(slack.posts[0].text).toContain("🟢 `v2/auto`");
+  // The green probe is rolled up, not listed individually, in the top-level.
+  expect(slack.posts[0].text).not.toMatch(/• 🟢 `v2\/auto`/);
+  expect(slack.posts[0].text).toContain("🟢 1 probe fully green");
 
-  // Both thread replies target the digest ts.
+  // All replies target the digest ts.
   const threadTs = slack.posts[1].threadTs;
   expect(threadTs).toBeDefined();
   expect(slack.posts[2].threadTs).toBe(threadTs);
+  expect(slack.posts[3].threadTs).toBe(threadTs);
 
-  // Each thread reply names the probe it's breaking down.
-  const threadTexts = [slack.posts[1].text, slack.posts[2].text];
-  expect(threadTexts.some((t) => t.includes("`v1/bad`"))).toBe(true);
-  expect(threadTexts.some((t) => t.includes("`v2/meh`"))).toBe(true);
+  // First thread post is the all-green roll-up.
+  expect(slack.posts[1].text).toContain("All-green probes (1)");
+  expect(slack.posts[1].text).toContain("`v2/auto`");
+
+  // Remaining two are the individualized RED breakdowns, one per probe.
+  const redThreads = [slack.posts[2].text, slack.posts[3].text];
+  expect(redThreads.some((t) => t.includes("`v1/bad`"))).toBe(true);
+  expect(redThreads.some((t) => t.includes("`v2/meh`"))).toBe(true);
+});
+
+it("runProbes attaches registryDelta to the artifact when v2Models are provided and the GCS snapshot is missing (first-snapshot case)", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    if (String(url).includes("/oauth2/token")) {
+      return new Response(JSON.stringify({ access_token: "abc" }), {
+        status: 200,
+      });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  });
+
+  const probe: Probe = {
+    signature: "v2/noop",
+    label: "V2 · noop",
+    async run() {
+      return {
+        signature: "v2/noop",
+        label: "V2 · noop",
+        endpoint: "u",
+        apiVersion: "v2",
+        httpStatus: 200,
+        verdict: "PASS",
+        severity: "GREEN",
+        durationMs: 10,
+        details: {},
+        completedAt: 1700000000,
+      };
+    },
+  };
+  const gcs = fakeGcs(); // no seeded files → first snapshot
+
+  const artifact = await runProbes(
+    CONFIG,
+    {
+      probes: [probe],
+      gcs,
+      slack: fakeSlack(),
+      v2Models: [
+        { id: "gloo-a", family: "Anthropic", name: "A" },
+        { id: "gloo-b", family: "OpenAI", name: "B" },
+      ],
+    },
+    new Date("2026-04-20T18:00:00Z")
+  );
+
+  expect(artifact.registryDelta).toBeDefined();
+  expect(artifact.registryDelta?.isFirstSnapshot).toBe(true);
+  expect(artifact.registryDelta?.hasChanges).toBe(false);
+  expect(artifact.registryDelta?.added).toEqual(["gloo-a", "gloo-b"]);
+
+  // The probe runner also persists the new snapshot to GCS for the next run.
+  const snapshotWrite = gcs.writes.get("state/model-registry-snapshot.json");
+  expect(snapshotWrite).toBeDefined();
+  expect((snapshotWrite as { modelIds: string[] }).modelIds).toEqual([
+    "gloo-a",
+    "gloo-b",
+  ]);
+});
+
+it("runProbes computes an add/remove delta against a previously persisted snapshot", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    if (String(url).includes("/oauth2/token")) {
+      return new Response(JSON.stringify({ access_token: "abc" }), {
+        status: 200,
+      });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  });
+
+  const probe: Probe = {
+    signature: "v2/noop",
+    label: "V2 · noop",
+    async run() {
+      return {
+        signature: "v2/noop",
+        label: "V2 · noop",
+        endpoint: "u",
+        apiVersion: "v2",
+        httpStatus: 200,
+        verdict: "PASS",
+        severity: "GREEN",
+        durationMs: 10,
+        details: {},
+        completedAt: 1700000000,
+      };
+    },
+  };
+  const gcs = fakeGcs({
+    files: {
+      "state/model-registry-snapshot.json": {
+        capturedAt: "2026-04-19T18:00:00.000Z",
+        runId: "prior-run",
+        modelIds: ["gloo-a", "gloo-gone"],
+      },
+    },
+  });
+
+  const artifact = await runProbes(
+    CONFIG,
+    {
+      probes: [probe],
+      gcs,
+      slack: fakeSlack(),
+      v2Models: [
+        { id: "gloo-a", family: "Anthropic", name: "A" },
+        { id: "gloo-new", family: "OpenAI", name: "N" },
+      ],
+    },
+    new Date("2026-04-20T18:00:00Z")
+  );
+
+  const delta = artifact.registryDelta;
+  expect(delta).toBeDefined();
+  expect(delta?.isFirstSnapshot).toBe(false);
+  expect(delta?.hasChanges).toBe(true);
+  expect(delta?.added).toEqual(["gloo-new"]);
+  expect(delta?.removed).toEqual(["gloo-gone"]);
+  expect(delta?.previousCapturedAt).toBe("2026-04-19T18:00:00.000Z");
+});
+
+it("runProbes does not attach registryDelta when v2Models are not passed", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ access_token: "abc" }), { status: 200 })
+  );
+  const probe: Probe = {
+    signature: "v1/x",
+    label: "x",
+    async run() {
+      return {
+        signature: "v1/x",
+        label: "x",
+        endpoint: "u",
+        apiVersion: "v1",
+        httpStatus: 200,
+        verdict: "PASS",
+        severity: "GREEN",
+        durationMs: 1,
+        details: {},
+        completedAt: 1,
+      };
+    },
+  };
+  const gcs = fakeGcs();
+  const artifact = await runProbes(
+    CONFIG,
+    { probes: [probe], gcs, slack: fakeSlack() },
+    new Date("2026-04-20T18:00:00Z")
+  );
+  expect(artifact.registryDelta).toBeUndefined();
+  // And no snapshot blob was written.
+  expect(gcs.writes.has("state/model-registry-snapshot.json")).toBe(false);
+});
+
+it("runDigest renders the registry delta as a YELLOW-flavored block in the top-level post", async () => {
+  const artifact: RunArtifact = {
+    runId: "r",
+    startedAt: "2026-04-20T06:00:00Z",
+    completedAt: "2026-04-20T06:00:30Z",
+    outcomes: [
+      {
+        signature: "v2/auto",
+        label: "V2 · auto",
+        endpoint: "u",
+        apiVersion: "v2",
+        httpStatus: 200,
+        verdict: "PASS",
+        severity: "GREEN",
+        durationMs: 1000,
+        details: {},
+        completedAt: 1700000000,
+      },
+    ],
+    registryDelta: {
+      previousCapturedAt: "2026-04-19T18:00:00.000Z",
+      currentCapturedAt: "2026-04-20T06:00:00.000Z",
+      added: ["gloo-new-model"],
+      removed: ["gloo-retired"],
+      isFirstSnapshot: false,
+      hasChanges: true,
+    },
+  };
+  const gcs = fakeGcs({
+    files: { "runs/2026/04/20/06-r.json": artifact },
+    list: ["runs/2026/04/20/06-r.json"],
+  });
+  const slack = fakeSlack();
+
+  const summary = await runDigest(
+    CONFIG,
+    { gcs, slack },
+    new Date("2026-04-20T18:00:00Z")
+  );
+
+  // Top-level post mentions the registry change with a YELLOW-flavored
+  // emoji and lists the added/removed ids. No :rotating_light: in the
+  // block itself — RED is reserved for failing probes.
+  expect(slack.posts[0].text).toContain(":large_yellow_circle:");
+  expect(slack.posts[0].text).toContain("`/platform/v2/models` changed");
+  expect(slack.posts[0].text).toContain("gloo-new-model");
+  expect(slack.posts[0].text).toContain("gloo-retired");
+
+  // Each add + each remove bumps the YELLOW severity counter.
+  expect(summary.severityCounts.YELLOW).toBe(2);
+});
+
+it("runDigest filters outcomes against the current snapshot — retired signatures drop from the digest", async () => {
+  const artifact: RunArtifact = {
+    runId: "mixed",
+    startedAt: "2026-04-20T06:00:00Z",
+    completedAt: "2026-04-20T06:00:30Z",
+    outcomes: [
+      // A currently-probed model that passed.
+      {
+        signature: "v2/model/gloo-a",
+        label: "V2 · A",
+        endpoint: "u",
+        apiVersion: "v2",
+        httpStatus: 200,
+        verdict: "PASS",
+        severity: "GREEN",
+        durationMs: 1000,
+        details: {},
+        completedAt: 1700000000,
+      },
+      // A retired-from-registry model that failed in a pre-deploy run —
+      // should NOT contribute to "Needs attention" because it isn't in
+      // the current probe set.
+      {
+        signature: "v2/model/gloo-retired",
+        label: "V2 · Retired",
+        endpoint: "u",
+        apiVersion: "v2",
+        httpStatus: 400,
+        verdict: "FAIL",
+        severity: "RED",
+        durationMs: 400,
+        details: {},
+        completedAt: 1700000100,
+      },
+      // A V1 probe that's no longer in our fixture set.
+      {
+        signature: "v1/llama3-70b",
+        label: "V1 · llama3-70b",
+        endpoint: "u",
+        apiVersion: "v1",
+        httpStatus: 503,
+        verdict: "FAIL",
+        severity: "RED",
+        durationMs: 500,
+        details: {},
+        completedAt: 1700000200,
+      },
+    ],
+  };
+
+  const gcs = fakeGcs({
+    files: {
+      "runs/2026/04/20/06-mixed.json": artifact,
+      // Snapshot lists only gloo-a — so gloo-retired and v1/llama3-70b
+      // should both drop out of the digest.
+      "state/model-registry-snapshot.json": {
+        capturedAt: "2026-04-20T06:30:00Z",
+        runId: "some-run",
+        modelIds: ["gloo-a"],
+      },
+    },
+    list: ["runs/2026/04/20/06-mixed.json"],
+  });
+  const slack = fakeSlack();
+
+  const summary = await runDigest(
+    CONFIG,
+    { gcs, slack },
+    new Date("2026-04-20T18:00:00Z")
+  );
+
+  // Retired signatures are filtered out before aggregation.
+  expect(summary.probesRun).toBe(1);
+  expect(summary.severityCounts.RED).toBe(0);
+  expect(summary.perProbe.map((p) => p.signature)).toEqual(["v2/model/gloo-a"]);
+
+  // And the top-level digest post correctly reads "all green" rather
+  // than surfacing the retired signatures in "Needs attention".
+  expect(slack.posts[0].text).not.toContain("gloo-retired");
+  expect(slack.posts[0].text).not.toContain("v1/llama3-70b");
+  expect(slack.posts[0].text).toContain("All probes fully green");
+});
+
+it("runDigest falls open when the snapshot blob is missing (no filter)", async () => {
+  const artifact: RunArtifact = {
+    runId: "r",
+    startedAt: "2026-04-20T06:00:00Z",
+    completedAt: "2026-04-20T06:00:30Z",
+    outcomes: [
+      {
+        signature: "v2/model/whatever",
+        label: "x",
+        endpoint: "u",
+        apiVersion: "v2",
+        httpStatus: 500,
+        verdict: "FAIL",
+        severity: "RED",
+        durationMs: 10,
+        details: {},
+        completedAt: 1,
+      },
+    ],
+  };
+  const gcs = fakeGcs({
+    // Deliberately NO snapshot — emulates a very-first-digest-ever run.
+    files: { "runs/2026/04/20/06-r.json": artifact },
+    list: ["runs/2026/04/20/06-r.json"],
+  });
+  const slack = fakeSlack();
+
+  const summary = await runDigest(
+    CONFIG,
+    { gcs, slack },
+    new Date("2026-04-20T18:00:00Z")
+  );
+
+  // No filtering applied — the single RED outcome still surfaces.
+  expect(summary.probesRun).toBe(1);
+  expect(summary.severityCounts.RED).toBe(1);
+});
+
+it("runDigest renders a subdued baseline note on the first-snapshot case", async () => {
+  const artifact: RunArtifact = {
+    runId: "r",
+    startedAt: "2026-04-20T06:00:00Z",
+    completedAt: "2026-04-20T06:00:30Z",
+    outcomes: [
+      {
+        signature: "v2/auto",
+        label: "V2 · auto",
+        endpoint: "u",
+        apiVersion: "v2",
+        httpStatus: 200,
+        verdict: "PASS",
+        severity: "GREEN",
+        durationMs: 1000,
+        details: {},
+        completedAt: 1700000000,
+      },
+    ],
+    registryDelta: {
+      previousCapturedAt: null,
+      currentCapturedAt: "2026-04-20T06:00:00.000Z",
+      added: ["gloo-a", "gloo-b"],
+      removed: [],
+      isFirstSnapshot: true,
+      hasChanges: false,
+    },
+  };
+  const gcs = fakeGcs({
+    files: { "runs/2026/04/20/06-r.json": artifact },
+    list: ["runs/2026/04/20/06-r.json"],
+  });
+  const slack = fakeSlack();
+
+  const summary = await runDigest(
+    CONFIG,
+    { gcs, slack },
+    new Date("2026-04-20T18:00:00Z")
+  );
+
+  expect(slack.posts[0].text).toContain(":memo:");
+  expect(slack.posts[0].text).toContain("baseline captured");
+  // Baseline should NOT contribute to the YELLOW counter — it's not a
+  // change, it's the first measurement.
+  expect(summary.severityCounts.YELLOW).toBe(0);
 });

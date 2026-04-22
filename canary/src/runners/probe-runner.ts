@@ -10,6 +10,15 @@ import { getAccessToken } from "@glooai/scripts";
 import type { Probe, ProbeOutcome } from "../probes/types.js";
 import type { CanaryConfig } from "../config.js";
 import {
+  computeRegistryDelta,
+  type ModelRegistryDelta,
+} from "../fixtures/model-registry-delta.js";
+import type { V2ModelSummary } from "../fixtures/v2-models.js";
+import {
+  loadLatestSnapshot,
+  saveSnapshot,
+} from "../sinks/model-registry-snapshot.js";
+import {
   ACTIVE_FAILURES_PATH,
   runArtifactPath,
   type ActiveFailures,
@@ -22,6 +31,13 @@ export type ProbeRunnerDeps = {
   probes: Probe[];
   gcs: GcsClient;
   slack: SlackClient;
+  /**
+   * Hydrated list of V2 models used to build the direct-model probes.
+   * When present, the probe runner will also diff this list against the
+   * previous GCS-archived snapshot and attach the resulting delta to the
+   * RunArtifact. Omit to disable the snapshot+diff step entirely.
+   */
+  v2Models?: V2ModelSummary[];
 };
 
 export async function runProbes(
@@ -48,11 +64,19 @@ export async function runProbes(
     outcomes.push(outcome);
   }
 
+  // Snapshot + diff the live registry BEFORE writing the run artifact so
+  // the delta is embedded in the archived JSON — the digest can then
+  // aggregate deltas across the 24h window without re-reading GCS
+  // state. All snapshot-path errors are logged and swallowed: this is a
+  // secondary feature and must never fail the primary probe run.
+  const registryDelta = await maybeSnapshotRegistry(deps, now, config);
+
   const artifact: RunArtifact = {
     runId: config.execution.runId,
     startedAt: config.execution.startedAt,
     completedAt: new Date().toISOString(),
     outcomes,
+    ...(registryDelta ? { registryDelta } : {}),
   };
 
   await deps.gcs.writeJson(
@@ -63,6 +87,42 @@ export async function runProbes(
   await reconcileFailures(artifact, deps, config, now);
 
   return artifact;
+}
+
+async function maybeSnapshotRegistry(
+  deps: ProbeRunnerDeps,
+  now: Date,
+  config: CanaryConfig
+): Promise<ModelRegistryDelta | undefined> {
+  const models = deps.v2Models;
+  if (!models) return undefined;
+
+  const currentIds = models.map((m) => m.id).sort();
+  try {
+    const previous = await loadLatestSnapshot(deps.gcs);
+    const delta = computeRegistryDelta({
+      previous: previous
+        ? { capturedAt: previous.capturedAt, modelIds: previous.modelIds }
+        : null,
+      current: { capturedAt: now.toISOString(), modelIds: currentIds },
+    });
+
+    // Overwrite the single "latest" blob on every run — the GCS layout
+    // mirrors the existing `state/active-failures.json` pattern, so no
+    // new infra, no new secrets, and the file is small (one JSON doc).
+    await saveSnapshot(deps.gcs, {
+      capturedAt: now.toISOString(),
+      runId: config.execution.runId,
+      modelIds: currentIds,
+    });
+    return delta;
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `model-registry-snapshot: step failed (non-fatal): ${(error as Error).message}`
+    );
+    return undefined;
+  }
 }
 
 /**
