@@ -1,0 +1,90 @@
+name: Deploy canary
+
+# Builds the canary Docker image via Cloud Build, then `terraform apply`s the
+# prod stack with the new image tag. Fires on every merge-to-main that touches
+# `canary/**` so the canary deploy never again requires a local apply.
+#
+# Auth: Workload Identity Federation (keyless). See canary/terraform/README.md
+# for the one-time GCP bootstrap + required GitHub Actions variables.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "canary/**"
+      - ".github/workflows/deploy-canary.yaml"
+  workflow_dispatch:
+
+# Never race two applies against the same terraform state. A later commit
+# waits for the current deploy to finish rather than cancelling it.
+concurrency:
+  group: deploy-canary-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # required for Workload Identity Federation
+
+jobs:
+  deploy:
+    name: build-and-apply
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: canary/terraform/envs/prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (WIF)
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      # `auth@v2` alone wires up GOOGLE_APPLICATION_CREDENTIALS (enough for
+      # the terraform google provider). `gcloud` is installed separately
+      # because the Cloud Build submit step shells out to it.
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Resolve image tag from commit SHA
+        id: tag
+        working-directory: ${{ github.workspace }}
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Build context = repo root because canary/Dockerfile pulls in the
+      # pnpm workspace (see canary/cloudbuild.yaml header comment).
+      - name: Build & push canary image (Cloud Build)
+        working-directory: ${{ github.workspace }}
+        run: |
+          gcloud builds submit . \
+            --project="${{ vars.GCP_PROJECT_ID }}" \
+            --region="${{ vars.GCP_REGION }}" \
+            --config=canary/cloudbuild.yaml \
+            --substitutions=_TAG=${{ steps.tag.outputs.short_sha }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          # Keep aligned with the terraform-validate job in ci.yaml so PR
+          # validation and main apply can't disagree on parser behaviour.
+          terraform_version: 1.9.8
+
+      - name: terraform init
+        run: terraform init -input=false
+
+      # Plan → file → apply (rather than `apply -auto-approve` directly) so
+      # the diff we inspected is exactly what gets applied. If state mutates
+      # between plan and apply, the apply aborts instead of surprising us.
+      - name: terraform plan
+        run: |
+          terraform plan -input=false -no-color \
+            -var="image_tag=${{ steps.tag.outputs.short_sha }}" \
+            -out=tfplan
+
+      - name: terraform apply
+        run: terraform apply -input=false -auto-approve tfplan

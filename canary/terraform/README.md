@@ -52,7 +52,86 @@ printf '<xoxb-slack-token>'    | gcloud secrets versions add alerts-slack-bot-to
 printf 'C0AU2FM2Q86'           | gcloud secrets versions add alerts-slack-channel-id      --data-file=-
 ```
 
-## Normal apply flow
+### 3. GitHub Actions → GCP (Workload Identity Federation)
+
+Required once so `.github/workflows/deploy-canary.yaml` can auth without a
+service-account JSON key. Create the pool + provider, a deploy SA, and bind
+the WIF principal to that SA:
+
+```bash
+PROJECT_ID=glooai
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+REPO="glooai/typescript-example"
+SA=github-actions-canary-deploy
+SA_EMAIL="${SA}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+# Pool + OIDC provider, constrained to this repo
+gcloud iam workload-identity-pools create github-actions \
+  --project="$PROJECT_ID" --location=global \
+  --display-name="GitHub Actions"
+
+gcloud iam workload-identity-pools providers create-oidc github \
+  --project="$PROJECT_ID" --location=global \
+  --workload-identity-pool=github-actions \
+  --display-name="GitHub OIDC" \
+  --issuer-uri="https://token.actions.githubusercontent.com" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
+  --attribute-condition="assertion.repository == '${REPO}'"
+
+# Deploy SA
+gcloud iam service-accounts create "$SA" \
+  --project="$PROJECT_ID" --display-name="GitHub Actions — canary deploy"
+
+for ROLE in \
+  roles/cloudbuild.builds.editor \
+  roles/artifactregistry.writer \
+  roles/storage.admin \
+  roles/run.admin \
+  roles/cloudscheduler.admin \
+  roles/secretmanager.admin \
+  roles/iam.serviceAccountUser \
+  roles/serviceusage.serviceUsageConsumer; do
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:${SA_EMAIL}" --role="$ROLE"
+done
+
+# Bind the WIF principal (any workflow in this repo) to the SA
+gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
+  --project="$PROJECT_ID" \
+  --role="roles/iam.workloadIdentityUser" \
+  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-actions/attribute.repository/${REPO}"
+```
+
+Then add these **repository variables** (Settings → Secrets and variables →
+Actions → _Variables_ tab — not secrets; they're identifiers, not credentials):
+
+| Variable                         | Value                                                                                              |
+| -------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `GCP_PROJECT_ID`                 | `glooai`                                                                                           |
+| `GCP_REGION`                     | `us-central1`                                                                                      |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/github-actions/providers/github` |
+| `GCP_DEPLOY_SERVICE_ACCOUNT`     | `github-actions-canary-deploy@glooai.iam.gserviceaccount.com`                                      |
+
+## Normal deploy flow (CI)
+
+Every merge to `main` that touches `canary/**` triggers
+[`.github/workflows/deploy-canary.yaml`](../../.github/workflows/deploy-canary.yaml),
+which:
+
+1. Builds the image via `gcloud builds submit` using `canary/cloudbuild.yaml`
+   with `_TAG=<short-sha>`.
+2. Runs `terraform init && terraform plan -out=tfplan -var="image_tag=<short-sha>"`
+   against `envs/prod`.
+3. Runs `terraform apply tfplan`.
+
+Manual re-run / rollback: `gh workflow run deploy-canary.yaml --ref <sha>` —
+the SHA drives both the image tag and the terraform vars, so dispatching an
+older commit redeploys that exact revision.
+
+## Manual apply flow (break-glass only)
+
+If CI is down or you're bootstrapping from scratch, the original local flow
+still works:
 
 ```bash
 cd canary/terraform/envs/prod
