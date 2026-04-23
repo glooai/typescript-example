@@ -90,10 +90,16 @@ for ROLE in \
   roles/cloudscheduler.admin \
   roles/secretmanager.admin \
   roles/iam.serviceAccountUser \
-  roles/serviceusage.serviceUsageConsumer; do
+  roles/serviceusage.serviceUsageConsumer \
+  roles/resourcemanager.projectIamAdmin; do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:${SA_EMAIL}" --role="$ROLE"
 done
+
+# Note on `roles/resourcemanager.projectIamAdmin`: required so Terraform can
+# read+write project-level IAM bindings (e.g. `google_project_iam_member`
+# resources like `canary_log_writer`). Without it, `terraform plan` fails on
+# refresh with a 403 when Google's project IAM policy is queried.
 
 # Bind the WIF principal (any workflow in this repo) to the SA
 gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
