@@ -29,7 +29,7 @@ export type RunArtifact = {
 };
 
 export type ActiveFailures = {
-  // signature -> { firstSeenAt, lastSeenAt, slackTs, attempts, lastOutcome, topLevelText? }
+  // signature -> { firstSeenAt, lastSeenAt, slackTs, attempts, lastOutcome, topLevelText?, recoveredAt? }
   [signature: string]: {
     firstSeenAt: string;
     lastSeenAt: string;
@@ -46,6 +46,15 @@ export type ActiveFailures = {
      * the threaded recovery reply + add the reaction.
      */
     topLevelText?: string;
+    /**
+     * When the incident was last closed by a recovery (ISO-8601).
+     * An entry with `recoveredAt` set is a "tombstone" — the
+     * incident is closed, but we keep it around for a cooldown
+     * window so a flapping probe (fail → pass → fail within minutes)
+     * gets its next failure threaded onto the original top-level
+     * post instead of spawning a fresh one. GC'd past cooldown.
+     */
+    recoveredAt?: string;
   };
 };
 

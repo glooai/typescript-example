@@ -163,12 +163,43 @@ async function maybeSnapshotRegistry(
 }
 
 /**
+ * Recovery debounce window. A signature that just passed goes into
+ * "provisional recovery" — silent, no Slack post yet. Only after it's
+ * continuously passed for this long do we publish the ✅ recovery
+ * reply + banner + reaction and delete the state entry. If the probe
+ * fails again inside the window it snaps back to "open" silently.
+ *
+ * The purpose is aggressive notification coalescing: the user only
+ * wants to hear about a probe twice in a day — once on the initial
+ * outage and once in the daily digest if it's still open at that
+ * time — regardless of how many rounds it fails or how much it flaps
+ * in between. The debounce turns the normal Slack-per-run chatter
+ * into two posts: incident-opened, incident-confirmed-closed.
+ *
+ * 60 min was chosen to match the platform's periodic Full sweep
+ * interval — a probe that passes for 4 consecutive Light ticks during
+ * business hours (or 1 nighttime tick) is safely considered healed.
+ * Kept as a module constant (not a config) because tuning this is a
+ * code change, not a deployment toggle.
+ */
+const RECOVERY_DEBOUNCE_MS = 60 * 60 * 1000;
+
+/**
  * Walk the results against the previous active-failures map:
- *   - New RED signature → top-level post, record ts + topLevelText
- *   - Previously RED signature, still RED → threaded reply, increment attempts
- *   - Previously RED signature, now GREEN → threaded ✅ + reaction
- *     on the top-level post + chat.update prepending a "Recovered"
- *     marker to the top-level text, drop from map
+ *   - New RED signature → top-level post, record ts + topLevelText.
+ *     This is the ONLY Slack post made while an incident is open.
+ *   - Previously RED, still RED → silent state update. No Slack noise.
+ *   - Previously RED, RED again after a provisional recovery (flap) →
+ *     silent. Clear `recoveredAt`, bump attempts. No banner flip (the
+ *     banner was never swapped because the recovery wasn't confirmed).
+ *   - Previously RED, now GREEN (first pass) → silent. Mark the entry
+ *     with `recoveredAt` and wait for the debounce window to confirm.
+ *   - Previously RED, still GREEN past debounce → threaded ✅ reply
+ *     + ✅ reaction + chat.update banner, delete state. This is the
+ *     ONE notification that closes out the incident.
+ *
+ * The daily digest (a separate job) is where long-running incidents
+ * surface on the next day — see digest-runner.ts.
  */
 export async function reconcileFailures(
   artifact: RunArtifact,
@@ -185,14 +216,19 @@ export async function reconcileFailures(
     if (o.severity === "RED") failuresBySignature.set(o.signature, o);
   }
 
-  // 1. Handle current failures (new or recurring). Slack failures are
-  //    non-fatal per-signature so one bad post (rate-limited, transient
-  //    network blip, missing scope) doesn't abort the whole loop and
-  //    leave the state file unwritten — which would cause every
-  //    already-alerted failure to re-post as new on the next run.
+  // 1. Handle current failures.
+  //
+  //    Slack failures (only on the top-level post for a brand-new
+  //    incident) are non-fatal per-signature so one bad post
+  //    (rate-limited, transient network blip, missing scope) doesn't
+  //    abort the whole loop and leave the state file unwritten —
+  //    which would cause every already-alerted failure to re-post as
+  //    new on the next run.
   for (const [signature, outcome] of failuresBySignature) {
     const prior = next[signature];
     if (!prior) {
+      // Brand-new incident. This is the single "incident opened"
+      // notification for the signature.
       const topLevelText = formatFailureTopLevel(outcome, config);
       try {
         const posted = await deps.slack.post({ text: topLevelText });
@@ -205,72 +241,81 @@ export async function reconcileFailures(
           topLevelText,
         };
       } catch (error) {
-        // Don't record the signature in state — next run treats it as
-        // new and retries the top-level alert.
         // eslint-disable-next-line no-console
         console.warn(
           `slack.post (new ${signature}) failed: ${(error as Error).message}`
         );
       }
+    } else if (prior.recoveredAt) {
+      // Silent reopen — the signature was in its debounce window and
+      // failed again. The banner was never flipped to green (we only
+      // do that on *confirmed* recovery), so there's nothing to
+      // revert on the top-level post. Just snap back to "open".
+      next[signature] = {
+        ...prior,
+        lastSeenAt: now.toISOString(),
+        attempts: prior.attempts + 1,
+        lastVerdict: outcome.verdict,
+        recoveredAt: undefined,
+      };
     } else {
-      const recurringText = formatFailureRecurring(outcome, prior.attempts + 1);
-      try {
-        await deps.slack.post({ text: recurringText, threadTs: prior.slackTs });
-        next[signature] = {
-          ...prior,
-          lastSeenAt: now.toISOString(),
-          attempts: prior.attempts + 1,
-          lastVerdict: outcome.verdict,
-        };
-      } catch (error) {
-        // Keep prior state unchanged; reconciler will retry the thread
-        // reply on the next run.
-        // eslint-disable-next-line no-console
-        console.warn(
-          `slack.post (recurring ${signature}) failed: ${(error as Error).message}`
-        );
-      }
+      // Recurring failure on an open incident — silent state update.
+      // The user learns about it exactly once per day, via the
+      // digest, as long as it stays open.
+      next[signature] = {
+        ...prior,
+        lastSeenAt: now.toISOString(),
+        attempts: prior.attempts + 1,
+        lastVerdict: outcome.verdict,
+      };
     }
   }
 
-  // 2. Handle recoveries — signatures previously failing, now passing.
-  //    Recovery failures are also non-fatal: leave the state entry in
-  //    place so the next run retries the recovery message.
+  // 2. Handle signatures that are NOT failing this run.
+  //    - No prior entry: nothing to do.
+  //    - Prior entry, not yet recovered: start the debounce (silent).
+  //    - Prior entry, recovering, still inside debounce: silent no-op.
+  //    - Prior entry, recovering, past debounce: post confirmed
+  //      recovery + banner + reaction, delete state.
   for (const signature of Object.keys(existing)) {
-    if (!failuresBySignature.has(signature)) {
-      const priorEntry = existing[signature];
-      const priorTs = priorEntry.slackTs;
+    if (failuresBySignature.has(signature)) continue;
+    const prior = next[signature];
+    if (!prior) continue;
+
+    if (!prior.recoveredAt) {
+      // First pass after failure — start the debounce. Silent.
+      next[signature] = {
+        ...prior,
+        recoveredAt: now.toISOString(),
+        lastSeenAt: now.toISOString(),
+      };
+      continue;
+    }
+
+    const elapsed = now.getTime() - Date.parse(prior.recoveredAt);
+    if (Number.isFinite(elapsed) && elapsed >= RECOVERY_DEBOUNCE_MS) {
+      // Debounce expired — publish the confirmed-recovery notification
+      // and retire the state entry. Slack failures here are non-fatal:
+      // if any call throws we leave the tombstone in place and retry
+      // on the next reconcile.
       try {
         await deps.slack.post({
-          text: `:white_check_mark: Recovered — probe \`${signature}\` is passing again as of ${now.toISOString()}.`,
-          threadTs: priorTs,
+          text: formatConfirmedRecovery(signature, prior.recoveredAt, now),
+          threadTs: prior.slackTs,
         });
-        // ✅ reaction on the top-level post — subtle but persistent,
-        // visible from the channel sidebar search for resolved
-        // incidents.
         try {
-          await deps.slack.react(priorTs, "white_check_mark");
+          await deps.slack.react(prior.slackTs, "white_check_mark");
         } catch (error) {
-          // Already-reacted or missing scope — not fatal.
           // eslint-disable-next-line no-console
           console.warn(`reactions.add skipped: ${(error as Error).message}`);
         }
-        // chat.update on the top-level post — prepends a green-check
-        // banner to the original failure text so the channel
-        // overview makes the resolved state obvious without opening
-        // the thread. Skipped when the legacy state entry has no
-        // stored text (backwards-compat path).
-        if (priorEntry.topLevelText) {
+        if (prior.topLevelText) {
           try {
             await deps.slack.update({
-              ts: priorTs,
-              text: formatRecoveredTopLevel(priorEntry.topLevelText, now),
+              ts: prior.slackTs,
+              text: formatRecoveredTopLevel(prior.topLevelText, now),
             });
           } catch (error) {
-            // Missing scope (`chat:write` for bot's own messages is
-            // usually implied, but wire it up explicitly if the bot
-            // post wasn't made by this bot) — not fatal, we still
-            // have the thread reply + reaction.
             // eslint-disable-next-line no-console
             console.warn(`chat.update skipped: ${(error as Error).message}`);
           }
@@ -283,9 +328,26 @@ export async function reconcileFailures(
         );
       }
     }
+    // else: still inside the debounce — silent, no-op, wait for the
+    // next reconcile to re-evaluate.
   }
 
   await deps.gcs.writeJson(ACTIVE_FAILURES_PATH, next);
+}
+
+/**
+ * Confirmed-recovery message used once per incident, posted to the
+ * thread of the original top-level alert after the debounce window
+ * has elapsed with no re-failure. Surfaces the first-pass time so
+ * the on-caller can see how long the thing was actually healed
+ * before we published.
+ */
+export function formatConfirmedRecovery(
+  signature: string,
+  firstPassAt: string,
+  now: Date
+): string {
+  return `:white_check_mark: Recovered — probe \`${signature}\` has been passing continuously since ${firstPassAt} (confirmed ${now.toISOString()}).`;
 }
 
 export function formatFailureTopLevel(
@@ -313,16 +375,6 @@ export function formatFailureTopLevel(
     `• *HTTP status:* ${outcome.httpStatus ?? "network error"}`,
     `• *Latency:* ${outcome.durationMs}ms`,
     `• *Run:* \`${config.execution.runId}\` @ ${config.execution.startedAt}${model}${preview}`,
-  ].join("\n");
-}
-
-export function formatFailureRecurring(
-  outcome: ProbeOutcome,
-  attempt: number
-): string {
-  return [
-    `↻ Still failing (attempt ${attempt}) — \`${outcome.verdict}\``,
-    `• HTTP ${outcome.httpStatus ?? "net-error"} in ${outcome.durationMs}ms`,
   ].join("\n");
 }
 

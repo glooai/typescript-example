@@ -156,102 +156,90 @@ describe.skipIf(!credsAvailable())(
 
     for (const routing of ROUTING_CASES) {
       for (const shape of MESSAGE_SHAPES) {
-        // The `first-only` shape currently reproduces the bug 100% of the
-        // time across every routing mode, so we register those cases with
-        // `it.fails` — vitest treats a failing assertion as a pass, and
-        // will surface an "unexpected pass" (red CI) the moment Gloo's
-        // safety layer stops injecting the refusal. That's our signal to
-        // remove `.fails` and close the ticket.
-        //
-        // The `first+followup` shape is a normal assertion: it already
-        // passes today, and we want it to stay green so any regression
-        // into that shape is caught immediately.
-        const register = shape.label === "first-only" ? it.fails : it;
-        register(
-          `does not refuse benign homestead/tax question [${routing.label}][${shape.label}]`,
-          async () => {
-            if (!accessToken) {
+        // Both shapes (`first-only` and `first+followup`) should now
+        // return benign answers — the `first-only` reproducer used to
+        // fail 100% of the time, registered with `it.fails` as a
+        // canary for an eventual upstream fix. That fix landed: vitest
+        // started surfacing "unexpected pass" on those cases. Both
+        // shapes are now normal assertions so any regression back into
+        // over-moderation is caught immediately.
+        it(`does not refuse benign homestead/tax question [${routing.label}][${shape.label}]`, async () => {
+          if (!accessToken) {
+            throw new Error(
+              `[integration] No access token — token fetch failed in beforeAll: ${tokenError?.message ?? "unknown"}`
+            );
+          }
+
+          const refusals: string[] = [];
+          const replies: string[] = [];
+
+          for (let attempt = 1; attempt <= ATTEMPTS_PER_CASE; attempt++) {
+            const request: CompletionsV2Request = {
+              // Spread first so messages can't be overwritten.
+              ...(routing.body as CompletionsV2Request),
+              messages: shape.messages,
+            };
+
+            let response: CompletionsV2Response;
+            try {
+              // Generous per-request timeout — some V2 routes (notably
+              // gpt-5.2 via model_family=openai) take 20–45s with two
+              // messages in the conversation.
+              response = await postCompletionsV2(accessToken, request, 90_000);
+            } catch (error) {
+              // Surface the raw API error so we can see platform-side
+              // blocks (e.g. 400 Content Policy) in the test output.
               throw new Error(
-                `[integration] No access token — token fetch failed in beforeAll: ${tokenError?.message ?? "unknown"}`
+                `[${routing.label}][${shape.label}][attempt ${attempt}] Gloo V2 request failed: ${
+                  (error as Error).message
+                }`
               );
             }
 
-            const refusals: string[] = [];
-            const replies: string[] = [];
+            const content = response.choices?.[0]?.message?.content ?? "";
+            replies.push(content);
 
-            for (let attempt = 1; attempt <= ATTEMPTS_PER_CASE; attempt++) {
-              const request: CompletionsV2Request = {
-                // Spread first so messages can't be overwritten.
-                ...(routing.body as CompletionsV2Request),
-                messages: shape.messages,
-              };
+            // When the safety layer intercepts, Gloo returns a canned
+            // response with model="" and no routing_mechanism/routing_tier
+            // — i.e. the LLM is never invoked. We highlight that because
+            // it means the refusal is platform-side, not model-side.
+            const servedByModel =
+              Boolean(response.model) &&
+              response.model !== "" &&
+              Boolean(response.routing_mechanism);
+            const source = servedByModel
+              ? `model=${response.model} routing_mechanism=${response.routing_mechanism} routing_tier=${response.routing_tier ?? "n/a"}`
+              : `SAFETY-LAYER (no model invoked)`;
 
-              let response: CompletionsV2Response;
-              try {
-                // Generous per-request timeout — some V2 routes (notably
-                // gpt-5.2 via model_family=openai) take 20–45s with two
-                // messages in the conversation.
-                response = await postCompletionsV2(
-                  accessToken,
-                  request,
-                  90_000
-                );
-              } catch (error) {
-                // Surface the raw API error so we can see platform-side
-                // blocks (e.g. 400 Content Policy) in the test output.
-                throw new Error(
-                  `[${routing.label}][${shape.label}][attempt ${attempt}] Gloo V2 request failed: ${
-                    (error as Error).message
-                  }`
-                );
-              }
+            // eslint-disable-next-line no-console
+            console.log(
+              `\n[${routing.label}][${shape.label}][attempt ${attempt}] ` +
+                `${source}\nreply: ${content}\n`
+            );
 
-              const content = response.choices?.[0]?.message?.content ?? "";
-              replies.push(content);
+            expect(content.length).toBeGreaterThan(0);
 
-              // When the safety layer intercepts, Gloo returns a canned
-              // response with model="" and no routing_mechanism/routing_tier
-              // — i.e. the LLM is never invoked. We highlight that because
-              // it means the refusal is platform-side, not model-side.
-              const servedByModel =
-                Boolean(response.model) &&
-                response.model !== "" &&
-                Boolean(response.routing_mechanism);
-              const source = servedByModel
-                ? `model=${response.model} routing_mechanism=${response.routing_mechanism} routing_tier=${response.routing_tier ?? "n/a"}`
-                : `SAFETY-LAYER (no model invoked)`;
-
-              // eslint-disable-next-line no-console
-              console.log(
-                `\n[${routing.label}][${shape.label}][attempt ${attempt}] ` +
-                  `${source}\nreply: ${content}\n`
-              );
-
-              expect(content.length).toBeGreaterThan(0);
-
-              if (looksLikeRefusal(content)) {
-                refusals.push(content);
-              }
+            if (looksLikeRefusal(content)) {
+              refusals.push(content);
             }
+          }
 
-            if (refusals.length > 0) {
-              // eslint-disable-next-line no-console
-              console.error(
-                `[${routing.label}][${shape.label}] REPRODUCED the bug — ` +
-                  `${refusals.length}/${ATTEMPTS_PER_CASE} attempts refused ` +
-                  `a benign homestead/tax question.`
-              );
-            }
+          if (refusals.length > 0) {
+            // eslint-disable-next-line no-console
+            console.error(
+              `[${routing.label}][${shape.label}] REPRODUCED the bug — ` +
+                `${refusals.length}/${ATTEMPTS_PER_CASE} attempts refused ` +
+                `a benign homestead/tax question.`
+            );
+          }
 
-            expect(
-              refusals.length,
-              `[${routing.label}][${shape.label}] Completions V2 refused a ` +
-                `benign homestead/tax question ${refusals.length}/${ATTEMPTS_PER_CASE} ` +
-                `attempts. First refusal: ${refusals[0] ?? ""}`
-            ).toBe(0);
-          },
-          360_000
-        );
+          expect(
+            refusals.length,
+            `[${routing.label}][${shape.label}] Completions V2 refused a ` +
+              `benign homestead/tax question ${refusals.length}/${ATTEMPTS_PER_CASE} ` +
+              `attempts. First refusal: ${refusals[0] ?? ""}`
+          ).toBe(0);
+        }, 360_000);
       }
     }
   }
