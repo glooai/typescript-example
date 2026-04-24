@@ -213,6 +213,8 @@ export function summarize(
     EMPTY_COMPLETION: 0,
     SCHEMA_MISMATCH: 0,
     REFUSAL_REGRESSION: 0,
+    NOT_ENTITLED: 0,
+    TIMEOUT: 0,
   };
 
   let probesRun = 0;

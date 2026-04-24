@@ -11,7 +11,25 @@ export type Verdict =
   | "FAIL"
   | "EMPTY_COMPLETION"
   | "SCHEMA_MISMATCH"
-  | "REFUSAL_REGRESSION";
+  | "REFUSAL_REGRESSION"
+  /**
+   * Platform returned HTTP 403 for a model that our creds aren't
+   * entitled to. Stable configuration/entitlement signal, not an
+   * outage — always mapped to YELLOW so it flows into the digest
+   * thread instead of the RED alert path. (Common cause: a model
+   * published to `/platform/v2/models` that our canary OAuth client
+   * hasn't been granted access to.)
+   */
+  | "NOT_ENTITLED"
+  /**
+   * Probe-side `AbortSignal.timeout()` fired before the upstream
+   * responded. Always mapped to YELLOW — the canary's own timeout
+   * elapsing doesn't prove the platform is down, only that the model
+   * was slower than our per-fixture budget. Persistent TIMEOUT
+   * entries in the daily digest are the signal to either raise the
+   * fixture budget or escalate upstream.
+   */
+  | "TIMEOUT";
 
 export type ProbeContext = {
   accessToken: string;

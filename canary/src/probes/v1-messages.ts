@@ -46,6 +46,15 @@ export function buildV1Probe(fixture: V1MessagesFixture): Probe {
         const rawBody = await response.text();
         return assessV1(fixture, response.status, rawBody, started);
       } catch (error) {
+        // AbortError = our own `AbortSignal.timeout()` fired before the
+        // upstream answered. Classify as YELLOW / TIMEOUT so it flows
+        // into the daily-digest thread instead of paging as an outage.
+        // Kept symmetric with the V2 probe so any future V1 fixture
+        // (currently none; V1 is deprecated) inherits the same
+        // classification rules. Non-abort exceptions — DNS, TCP reset,
+        // TLS — stay RED.
+        const isAbort = (error as Error).name === "AbortError";
+        const timeoutMs = fixture.timeoutMs ?? 30_000;
         return {
           signature: fixture.signature,
           label: fixture.label,
@@ -53,12 +62,13 @@ export function buildV1Probe(fixture: V1MessagesFixture): Probe {
           apiVersion: "v1",
           model: fixture.model,
           httpStatus: null,
-          verdict: "FAIL",
-          severity: "RED",
+          verdict: isAbort ? "TIMEOUT" : "FAIL",
+          severity: isAbort ? "YELLOW" : "RED",
           durationMs: Date.now() - started,
           details: {
             error: (error as Error).message,
             errorName: (error as Error).name,
+            ...(isAbort ? { timeoutMs } : {}),
           },
           completedAt: Math.floor(Date.now() / 1000),
         };

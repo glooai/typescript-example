@@ -67,6 +67,14 @@ export function buildV2Probe(fixture: V2CompletionsFixture): Probe {
         const rawBody = await response.text();
         return assessV2(fixture, response.status, rawBody, started);
       } catch (error) {
+        // AbortError = our own `AbortSignal.timeout()` fired before the
+        // upstream answered. Classify as YELLOW / TIMEOUT so it flows
+        // into the daily-digest thread instead of paging as an outage.
+        // Everything else (DNS failure, TCP reset, TLS error, etc.) is
+        // still a hard RED — those genuinely mean "we could not reach
+        // the platform at all".
+        const isAbort = (error as Error).name === "AbortError";
+        const timeoutMs = fixture.timeoutMs ?? 90_000;
         return {
           signature: fixture.signature,
           label: fixture.label,
@@ -77,12 +85,13 @@ export function buildV2Probe(fixture: V2CompletionsFixture): Probe {
               ? fixture.routing.model
               : undefined,
           httpStatus: null,
-          verdict: "FAIL",
-          severity: "RED",
+          verdict: isAbort ? "TIMEOUT" : "FAIL",
+          severity: isAbort ? "YELLOW" : "RED",
           durationMs: Date.now() - started,
           details: {
             error: (error as Error).message,
             errorName: (error as Error).name,
+            ...(isAbort ? { timeoutMs } : {}),
           },
           completedAt: Math.floor(Date.now() / 1000),
         };
@@ -145,6 +154,37 @@ export function assessV2(
     responsePreview: rawBody.slice(0, 400),
     completedAt: Math.floor(Date.now() / 1000),
   };
+
+  // HTTP 403 "forbidden — insufficient permissions" is the canary's own
+  // credentials hitting a model they aren't entitled to call. This is a
+  // stable configuration signal (the model is listed in
+  // `/platform/v2/models` but our OAuth client wasn't granted access)
+  // rather than a platform outage. Classify as YELLOW / NOT_ENTITLED so
+  // it flows into the daily digest's YELLOW thread instead of paging the
+  // channel as a fresh red incident every time the registry is scraped.
+  //
+  // Two-layer match: fast path on `{"code":"forbidden"}` in the parsed
+  // body, fall-open to `status === 403` so any other 403 shape still
+  // demotes to YELLOW rather than over-paging. A genuinely-revoked
+  // canary token would have failed the OAuth step upstream in
+  // `probe-runner.ts` with a 401 and never reached a per-probe 403 — by
+  // construction, any 403 we see here is per-model entitlement, not
+  // global auth.
+  if (status === 403) {
+    return {
+      ...base,
+      model: modelFromFixture,
+      verdict: "NOT_ENTITLED",
+      severity: "YELLOW",
+      contentPreview: null,
+      details: {
+        reason: isInsufficientPermissions(rawBody)
+          ? "forbidden-insufficient-permissions"
+          : "forbidden",
+        body: rawBody.slice(0, 500),
+      },
+    };
+  }
 
   if (status < 200 || status >= 300) {
     return {
@@ -233,4 +273,28 @@ export function assessV2(
       routing_tier: shaped.routing_tier,
     },
   };
+}
+
+/**
+ * True if a raw HTTP 403 body looks like the V2 Completions "not
+ * entitled" shape — JSON with `code: "forbidden"`. We parse defensively
+ * because the shape is external contract and we don't want a
+ * classification regression to throw mid-probe and cascade the outcome
+ * into the catch-block RED path.
+ */
+export function isInsufficientPermissions(rawBody: string): boolean {
+  try {
+    const parsed = JSON.parse(rawBody) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "code" in parsed &&
+      (parsed as { code: unknown }).code === "forbidden"
+    ) {
+      return true;
+    }
+  } catch {
+    // fall through
+  }
+  return false;
 }
