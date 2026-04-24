@@ -70,11 +70,13 @@ One Docker image, two entry points selected by `CANARY_MODE`
 
 ## Alerting model
 
-- **RED failure** (HTTP 5xx, 4xx, empty completion, schema drift, refusal regression): immediate top-level Slack post with full metadata.
+- **RED failure** (HTTP 5xx, unexpected 4xx, empty completion, schema drift, refusal regression, non-abort network error): immediate top-level Slack post with full metadata.
 - **Recurring RED** (same signature failing on consecutive runs): **threaded reply** on the original post — no channel spam.
 - **Recovery**: threaded `:white_check_mark: Recovered` + reaction on the original post.
 - **Daily digest**: top-level post at 6:05am CT summarizing the preceding 24h — probes run, severity distribution, per-probe latency quantiles, archive state.
-- **YELLOW signals** (latency anomalies, routing shifts): **threaded reply** on the digest post.
+- **YELLOW signals** (latency anomalies, routing shifts, `NOT_ENTITLED` on HTTP 403, `TIMEOUT` on probe-side `AbortSignal.timeout()` firing): **threaded reply** on the digest post — no top-level page.
+  - `NOT_ENTITLED` fires when a model is listed in `/platform/v2/models` but our canary OAuth client isn't granted access. This is a stable configuration signal, not a platform outage.
+  - `TIMEOUT` fires when the probe's own timeout elapses before the upstream responds. A single occurrence is a latency tail; a persistent pattern on a specific model is the signal to raise the per-fixture timeout or escalate upstream.
 
 ## Local development
 

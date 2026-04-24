@@ -100,7 +100,14 @@ it("V2 probe routes auto_routing requests and passes through routing metadata", 
   expect(reqBody.auto_routing).toBe(true);
 });
 
-it("V2 probe surfaces AbortError as a RED FAIL with the error name", async () => {
+it("V2 probe surfaces AbortError as a YELLOW TIMEOUT with the error name", async () => {
+  // Probe-side `AbortSignal.timeout()` firing is a canary-induced
+  // latency signal, not a platform outage. We classify as YELLOW /
+  // TIMEOUT so the daily digest captures it as a signal instead of
+  // paging the channel every 15 min that a slow model is slow.
+  // The deeper regression coverage lives in
+  // `tests/probes/v2-completions.test.ts`; this test exists to guard
+  // the end-to-end probe-builder → fetch → outcome wiring.
   vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
     const err = new Error("The operation was aborted.");
     err.name = "AbortError";
@@ -117,6 +124,8 @@ it("V2 probe surfaces AbortError as a RED FAIL with the error name", async () =>
   });
 
   const outcome = await probe.run(CTX);
-  expect(outcome.verdict).toBe("FAIL");
+  expect(outcome.verdict).toBe("TIMEOUT");
+  expect(outcome.severity).toBe("YELLOW");
   expect(outcome.details.errorName).toBe("AbortError");
+  expect(outcome.details.timeoutMs).toBe(100);
 });
