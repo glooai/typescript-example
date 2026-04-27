@@ -49,13 +49,29 @@ const BENIGN_PROMPT =
 // the whole batch completes well under the 600s job timeout.
 const V2_DIRECT_PROBE_TIMEOUT_MS = 120_000;
 
-// Cap full-sweep probe responses at ~48 tokens (comfortably fits the
-// benign reply plus any refusal prefix the detector needs to match)
-// — the router + model-selection + safety layer all execute even with
-// a short cap, so coverage is preserved while inference spend drops
-// materially. See `.context/guides/gloo/api/completions-v2.md` for
-// the `max_tokens` contract.
-const V2_FULL_PROBE_MAX_TOKENS = 48;
+// Cap full-sweep probe responses at 2048 tokens. Must be high enough
+// for reasoning models (Gemini 2.5 Pro, GPT-OSS 120B, DeepSeek R1,
+// etc.) to spend their internal thinking budget AND still produce a
+// user-visible answer; any value below ~1024 causes reasoning models
+// to exhaust the cap on thinking and return an empty completion,
+// which the platform converts to HTTP 503 / `service_unavailable_error`
+// (provider fault). Per Gloo platform team (Jackson Southern,
+// 2026-04-27 #support-gloo-ai thread on the canary's GAI-5477 reports),
+// the example benign prompt requires at minimum `max_tokens = 1024`
+// for a reasoning model. We pick 2048 for headroom against future
+// reasoning models with deeper thinking budgets.
+//
+// Cost note: this is the *cap*, not the actual emitted size. Non-
+// reasoning models will still produce one short sentence. Reasoning
+// models bill thinking tokens as output, so their per-probe cost
+// rises — but the canary fires ~22 Full-tier probes per Full sweep
+// and most ticks are Light, so the total inference budget stays
+// well within the daily ceiling. See
+// `.context/guides/gloo/api/completions-v2.md` for the `max_tokens`
+// contract and the RCA at
+// `canary/.context/adrs/2026-04-27-reasoning-model-max-tokens-rca.md`
+// for the full incident narrative.
+const V2_FULL_PROBE_MAX_TOKENS = 2048;
 
 // Pulse-probe prompt — the single probe we fire in the "light" tier
 // every 15 min. Minimizes input token budget while still exercising
@@ -64,12 +80,21 @@ const V2_FULL_PROBE_MAX_TOKENS = 48;
 // it can go without drifting from realistic usage.
 const LIGHT_PULSE_PROMPT = "ping";
 
-// Light-tier cap. The pulse probe doesn't depend on content inspection
-// (any 2xx with non-empty `choices[0].message.content` counts as PASS
-// — benign:false turns off the refusal detector so we can't
-// false-positive a truncated reply). Keep this as small as the
-// refusal detector + schema validator both tolerate.
-const V2_LIGHT_PROBE_MAX_TOKENS = 4;
+// Light-tier cap. The pulse probe uses `auto_routing: true`, so the
+// platform may route the request to ANY model in the registry — and
+// today that registry includes reasoning models (Gemini 2.5 Pro,
+// GPT-OSS 120B, etc.) that need ~1024+ tokens of headroom or they
+// will exhaust the cap on thinking and return an empty completion
+// (which the platform surfaces as HTTP 503). The previous value of
+// 4 was a guaranteed false-RED whenever auto_routing landed on a
+// reasoning backend.
+//
+// Same minimum (1024) applies as for Full-tier probes; we use 1024
+// here rather than 2048 because the light pulse is content-blind
+// (`benign: false` turns off the refusal detector) and we don't
+// need the extra headroom for refusal-pattern matching. See the RCA
+// above for the full diagnosis.
+const V2_LIGHT_PROBE_MAX_TOKENS = 1024;
 
 /**
  * V1 Messages probes are intentionally empty. V1 is deprecated by design
