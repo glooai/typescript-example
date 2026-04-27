@@ -31,10 +31,23 @@ it("V1_FIXTURES is empty — V1 is deprecated and intentionally not probed", () 
   expect(V1_FIXTURES).toEqual([]);
 });
 
+// Reasoning models (Gemini 2.5 Pro, GPT-OSS 120B, DeepSeek R1, …)
+// spend tokens on internal thinking before any user-visible output.
+// Per the Gloo platform team's 2026-04-27 guidance, ANY V2 probe that
+// might land on a reasoning model needs at least 1024 max_tokens or
+// the model will exhaust the cap on thinking and return an empty
+// response — surfaced as HTTP 503 by the platform. The per-fixture
+// assertions and the buildV2Fixtures sweep below both enforce this
+// floor so a future "save tokens" PR can't reintroduce the regression
+// without the test suite catching it.
+const REASONING_MODEL_MIN_MAX_TOKENS = 1024;
+
 it("V2_AUTO_ROUTING_FIXTURE is the one statically-declared routing probe", () => {
   expect(V2_AUTO_ROUTING_FIXTURE.signature).toBe("v2/auto_routing");
   expect(V2_AUTO_ROUTING_FIXTURE.routing).toEqual({ kind: "auto_routing" });
-  expect(V2_AUTO_ROUTING_FIXTURE.maxTokens).toBe(48);
+  expect(V2_AUTO_ROUTING_FIXTURE.maxTokens).toBeGreaterThanOrEqual(
+    REASONING_MODEL_MIN_MAX_TOKENS
+  );
 });
 
 it("familySlug lowercases and hyphenates spaces", () => {
@@ -80,7 +93,13 @@ it("buildV2FamilyFixtures produces one fixture per distinct family with canonica
     family: "Open Source",
   });
   expect(openSource?.label).toBe("V2 · model_family=Open Source");
-  expect(openSource?.maxTokens).toBe(48);
+  // Family probes can route to a reasoning model (e.g. Open Source
+  // family currently includes GPT-OSS 120B, a reasoning backend).
+  // Must clear the reasoning-model floor so we don't synthesize false
+  // RED 503s when the family router lands on a reasoning member.
+  expect(openSource?.maxTokens).toBeGreaterThanOrEqual(
+    REASONING_MODEL_MIN_MAX_TOKENS
+  );
 });
 
 it("buildV2RoutingFixtures derives family probes from the live model list, plus auto_routing", () => {
@@ -140,20 +159,32 @@ it("buildV2DirectModelFixtures derives a deterministic fixture per model", () =>
   // probe-side 90s default.
   expect(haiku?.timeoutMs).toBeGreaterThanOrEqual(120_000);
   // Every direct-model fixture also caps the response with max_tokens
-  // so Full sweeps don't blow the inference budget. Refusal patterns
-  // still fit comfortably in this window.
-  expect(haiku?.maxTokens).toBe(48);
+  // so Full sweeps don't blow the inference budget. Floor must clear
+  // the reasoning-model thinking-budget minimum (the registry already
+  // includes reasoning models like Gemini 2.5 Pro and GPT-OSS 120B),
+  // and the cap must still leave headroom for refusal-pattern
+  // matching on benign:true probes.
+  expect(haiku?.maxTokens).toBeGreaterThanOrEqual(
+    REASONING_MODEL_MIN_MAX_TOKENS
+  );
 });
 
-it("V2_LIGHT_PULSE_FIXTURE is a single auto_routing probe with a tiny max_tokens cap", () => {
-  // The whole point of the light tier: one request, single-digit
-  // output tokens, runs every 15 min. Guards against accidental
-  // drift (e.g. somebody flipping benign:true back on and adding a
-  // refusal check that needs more tokens to match).
+it("V2_LIGHT_PULSE_FIXTURE is a single auto_routing probe sized for reasoning-model auto_routing landings", () => {
+  // The light tier uses auto_routing, so the platform may route to
+  // ANY model — including reasoning models (Gemini 2.5 Pro, GPT-OSS
+  // 120B, etc.) that need ≥1024 max_tokens or they exhaust the cap
+  // on thinking and the platform returns HTTP 503. The previous
+  // 4-token cap was a guaranteed false-RED on any auto_routing
+  // landing on a reasoning backend. See the 2026-04-27 RCA for the
+  // full incident narrative.
   expect(V2_LIGHT_PULSE_FIXTURE.routing).toEqual({ kind: "auto_routing" });
-  expect(V2_LIGHT_PULSE_FIXTURE.maxTokens).toBeLessThanOrEqual(8);
-  // benign:false disables the refusal detector — a 4-token response
-  // can't be inspected for refusal patterns without false positives.
+  expect(V2_LIGHT_PULSE_FIXTURE.maxTokens).toBeGreaterThanOrEqual(
+    REASONING_MODEL_MIN_MAX_TOKENS
+  );
+  // benign:false disables the refusal detector — a short response
+  // can't be inspected for refusal patterns without false positives,
+  // and the light pulse only needs the request → completion path to
+  // succeed (any 2xx with non-empty content counts as PASS).
   expect(V2_LIGHT_PULSE_FIXTURE.benign).toBe(false);
   // Signature namespace is kept distinct so digest filtering doesn't
   // conflate light-pulse runs with full-sweep auto_routing runs.
@@ -224,4 +255,34 @@ it("buildV2Fixtures surfaces loadModels failures so the probe run fails loudly",
       },
     })
   ).rejects.toThrow(/platform\/v2\/models unreachable/);
+});
+
+// ---------------------------------------------------------------------
+// Regression coverage for the 2026-04-27 reasoning-model max_tokens
+// incident: a max_tokens cap below the reasoning-model thinking-budget
+// floor (~1024) causes Gemini 2.5 Pro / GPT-OSS 120B / DeepSeek R1 to
+// exhaust the cap on thinking and return an empty completion, which
+// the platform converts to HTTP 503 / `service_unavailable_error`.
+// The canary correctly classifies that as RED, but the request was
+// malformed for the model class — every Full-tier RED across 5+ days
+// of digests was a self-inflicted false positive against three model
+// families. This block hard-fails any future fixture (or the light
+// pulse) that drops back below the floor.
+// ---------------------------------------------------------------------
+it("every Full-tier fixture passes a max_tokens cap that clears the reasoning-model floor", async () => {
+  const fixtures = await buildV2Fixtures({
+    loadModels: async () => MODELS,
+  });
+  for (const fixture of fixtures) {
+    expect(
+      fixture.maxTokens,
+      `fixture ${fixture.signature} must declare maxTokens ≥ ${REASONING_MODEL_MIN_MAX_TOKENS} so reasoning models can produce output after thinking`
+    ).toBeGreaterThanOrEqual(REASONING_MODEL_MIN_MAX_TOKENS);
+  }
+});
+
+it("V2_LIGHT_PULSE_FIXTURE clears the reasoning-model floor (auto_routing may land on reasoning backends)", () => {
+  expect(V2_LIGHT_PULSE_FIXTURE.maxTokens).toBeGreaterThanOrEqual(
+    REASONING_MODEL_MIN_MAX_TOKENS
+  );
 });
