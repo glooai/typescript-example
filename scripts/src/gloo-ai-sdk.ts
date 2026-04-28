@@ -22,7 +22,7 @@ type CachedToken = { accessToken: string; expiresAt: number };
 
 let cachedToken: CachedToken | null = null;
 
-async function getValidToken(creds: Credentials): Promise<string> {
+export async function getValidToken(creds: Credentials): Promise<string> {
   if (cachedToken && Date.now() < cachedToken.expiresAt) {
     return cachedToken.accessToken;
   }
@@ -43,7 +43,9 @@ async function getValidToken(creds: Credentials): Promise<string> {
  * different routing mechanism (`auto_routing` or `model_family`). Without
  * this Gloo V2 returns 400 ("only one routing mechanism allowed").
  */
-function normaliseRoutingBody(body: BodyInit | null | undefined): BodyInit {
+export function normaliseRoutingBody(
+  body: BodyInit | null | undefined
+): BodyInit {
   if (typeof body !== "string") {
     return body ?? "";
   }
