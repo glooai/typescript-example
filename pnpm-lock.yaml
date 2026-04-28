@@ -117,12 +117,21 @@ importers:
 
   scripts:
     dependencies:
+      "@ai-sdk/openai-compatible":
+        specifier: ^2.0.33
+        version: 2.0.33(zod@3.25.76)
+      ai:
+        specifier: ^6.0.108
+        version: 6.0.108(zod@3.25.76)
       dotenv:
         specifier: ^16.4.5
         version: 16.6.1
       jsonwebtoken:
         specifier: ^9.0.2
         version: 9.0.2
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
     devDependencies:
       "@types/jsonwebtoken":
         specifier: ^9.0.6
@@ -6112,6 +6121,13 @@ packages:
       }
 
 snapshots:
+  "@ai-sdk/gateway@3.0.61(zod@3.25.76)":
+    dependencies:
+      "@ai-sdk/provider": 3.0.8
+      "@ai-sdk/provider-utils": 4.0.17(zod@3.25.76)
+      "@vercel/oidc": 3.1.0
+      zod: 3.25.76
+
   "@ai-sdk/gateway@3.0.61(zod@4.3.6)":
     dependencies:
       "@ai-sdk/provider": 3.0.8
@@ -6119,11 +6135,24 @@ snapshots:
       "@vercel/oidc": 3.1.0
       zod: 4.3.6
 
+  "@ai-sdk/openai-compatible@2.0.33(zod@3.25.76)":
+    dependencies:
+      "@ai-sdk/provider": 3.0.8
+      "@ai-sdk/provider-utils": 4.0.17(zod@3.25.76)
+      zod: 3.25.76
+
   "@ai-sdk/openai-compatible@2.0.33(zod@4.3.6)":
     dependencies:
       "@ai-sdk/provider": 3.0.8
       "@ai-sdk/provider-utils": 4.0.17(zod@4.3.6)
       zod: 4.3.6
+
+  "@ai-sdk/provider-utils@4.0.17(zod@3.25.76)":
+    dependencies:
+      "@ai-sdk/provider": 3.0.8
+      "@standard-schema/spec": 1.1.0
+      eventsource-parser: 3.0.6
+      zod: 3.25.76
 
   "@ai-sdk/provider-utils@4.0.17(zod@4.3.6)":
     dependencies:
@@ -7251,6 +7280,14 @@ snapshots:
       - supports-color
 
   agent-base@7.1.4: {}
+
+  ai@6.0.108(zod@3.25.76):
+    dependencies:
+      "@ai-sdk/gateway": 3.0.61(zod@3.25.76)
+      "@ai-sdk/provider": 3.0.8
+      "@ai-sdk/provider-utils": 4.0.17(zod@3.25.76)
+      "@opentelemetry/api": 1.9.0
+      zod: 3.25.76
 
   ai@6.0.108(zod@4.3.6):
     dependencies:
