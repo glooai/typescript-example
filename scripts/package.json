@@ -19,8 +19,11 @@
     "glooai:sonnet-4-repro": "tsx src/sonnet-4-repro.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.33",
+    "ai": "^6.0.108",
     "dotenv": "^16.4.5",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.6",
