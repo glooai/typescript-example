@@ -28,26 +28,19 @@ variable "results_retention_days" {
   default     = 90
 }
 
-variable "probe_daytime_schedule_cron" {
-  description = "Probe-job daytime cron expression (America/Chicago timezone)."
+variable "probe_schedule_cron" {
+  description = "Probe-job cron expression (America/Chicago timezone)."
   type        = string
-  # Every 15 minutes from 06:00 through 16:45 CT (11h daytime window,
-  # 44 runs/day). 17:00 is handed off to the nighttime hourly job.
-  default = "*/15 6-16 * * *"
-}
-
-variable "probe_nighttime_schedule_cron" {
-  description = "Probe-job nighttime cron expression (America/Chicago timezone)."
-  type        = string
-  # Top-of-hour from 17:00 CT through 05:00 CT (13h nighttime window,
-  # 13 runs/day). 06:00 is handed back to the daytime 15-minute job.
-  default = "0 17-23,0-5 * * *"
+  # Four runs/day at midnight, 06:00, noon, and 18:00 CT.
+  # Down from 57 runs/day (15-min daytime + hourly nighttime) to minimize
+  # Cloud Run + AI token spend while keeping ≤6h outage detection latency.
+  default = "0 0,6,12,18 * * *"
 }
 
 variable "digest_schedule_cron" {
   description = "Digest-job cron expression (America/Chicago timezone)."
   type        = string
-  # 06:05 CT — 5 minutes after the first probe of the day so it sees fresh data
+  # 06:05 CT — 5 minutes after the 06:00 probe so the digest sees fresh data
   default = "5 6 * * *"
 }
 
@@ -60,13 +53,13 @@ variable "schedule_timezone" {
 variable "full_sweep_interval_ms" {
   description = <<-EOT
     How long a Full tier sweep stays "fresh" before the probe runner
-    demands another one regardless of health. Bounds per-model outage
-    detection latency in the steady-state (all-green) case.
-    Set to 3600000 (1h) to keep alignment with the "aware within the
-    hour of downtime" requirement. Raise to trade detection latency
-    for inference-budget headroom; lower to tighten coverage when
-    budget allows.
+    demands another one regardless of health. With probes running every
+    6 hours, a value of 3600000 (1h) ensures every probe triggers a Full
+    sweep (6h interval > 1h freshness threshold), giving complete model
+    coverage on each run. Raise to reduce per-run inference spend at the
+    cost of some runs being Light-tier only; lower toward 0 to always
+    force Full regardless of interval.
   EOT
   type        = number
-  default     = 3600000 # 1 hour
+  default     = 3600000 # 1 hour — every 6h probe triggers a Full sweep
 }
