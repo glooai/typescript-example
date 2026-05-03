@@ -3,6 +3,9 @@ import {
   V1_FIXTURES,
   V2_AUTO_ROUTING_FIXTURE,
   V2_LIGHT_PULSE_FIXTURE,
+  V2_TOOL_CALL_FIXTURE,
+  V2_MULTI_TURN_FIXTURE,
+  V2_SAFETY_JAILBREAK_FIXTURE,
   buildV2DirectModelFixtures,
   buildV2FamilyFixtures,
   buildV2Fixtures,
@@ -191,23 +194,27 @@ it("V2_LIGHT_PULSE_FIXTURE is a single auto_routing probe sized for reasoning-mo
   expect(V2_LIGHT_PULSE_FIXTURE.signature).toBe("v2/light/auto_routing");
 });
 
-it("buildV2Fixtures concatenates routing-mode + direct-model fixtures derived from the same model list", async () => {
+it("buildV2Fixtures concatenates routing-mode + direct-model fixtures + capability probes", async () => {
   const fixtures = await buildV2Fixtures({
     loadModels: async () => MODELS,
   });
 
-  // Routing fixtures come first, then direct-model fixtures.
+  // Routing fixtures come first, then direct-model fixtures, then capability probes.
   const signatures = fixtures.map((f) => f.signature);
   expect(signatures).toContain("v2/auto_routing");
   expect(signatures).toContain("v2/family/anthropic");
   expect(signatures).toContain("v2/family/open-source");
   expect(signatures).toContain("v2/family/openai");
   expect(signatures).toContain("v2/model/gloo-openai-gpt-5.2");
-  // 1 auto_routing + 3 families + 3 direct models = 7
-  expect(fixtures.length).toBe(7);
+  // Capability probes appended after registry-derived fixtures
+  expect(signatures).toContain("v2/tool-call/auto_routing");
+  expect(signatures).toContain("v2/multi-turn/auto_routing");
+  expect(signatures).toContain("v2/safety/jailbreak-block");
+  // 1 auto_routing + 3 families + 3 direct models + 3 capability = 10
+  expect(fixtures.length).toBe(10);
 });
 
-it("currentProbeSignatures includes routing + v2/model/<id> for every live model, plus V1 (empty today) and the light pulse", () => {
+it("currentProbeSignatures includes routing + v2/model/<id> for every live model, plus V1 (empty today), the light pulse, and capability probes", () => {
   const sigs = currentProbeSignatures(
     ["gloo-a", "gloo-b"],
     ["Anthropic", "Open Source"]
@@ -220,10 +227,46 @@ it("currentProbeSignatures includes routing + v2/model/<id> for every live model
   // Light-tier signature is included so the digest doesn't filter
   // light-pulse runs out of the 24h window as "retired."
   expect(sigs).toContain(V2_LIGHT_PULSE_FIXTURE.signature);
+  // Capability probes are always present regardless of the registry.
+  expect(sigs).toContain(V2_TOOL_CALL_FIXTURE.signature);
+  expect(sigs).toContain(V2_MULTI_TURN_FIXTURE.signature);
+  expect(sigs).toContain(V2_SAFETY_JAILBREAK_FIXTURE.signature);
   // No V1 entries because V1_FIXTURES is empty today.
   expect(sigs.every((s) => !s.startsWith("v1/"))).toBe(true);
-  // Total = light (1) + auto_routing (1) + 2 families + 2 models = 6
-  expect(sigs.length).toBe(6);
+  // Total = light (1) + auto_routing (1) + 2 families + 2 models + 3 capability = 9
+  expect(sigs.length).toBe(9);
+});
+
+it("V2_TOOL_CALL_FIXTURE is a tool-calling probe with expectToolCall set and max_tokens ≥ floor", () => {
+  expect(V2_TOOL_CALL_FIXTURE.signature).toBe("v2/tool-call/auto_routing");
+  expect(V2_TOOL_CALL_FIXTURE.expectToolCall).toBe("get_weather");
+  expect(V2_TOOL_CALL_FIXTURE.tools).toBeDefined();
+  expect(V2_TOOL_CALL_FIXTURE.tools!.length).toBeGreaterThan(0);
+  expect(V2_TOOL_CALL_FIXTURE.maxTokens).toBeGreaterThanOrEqual(
+    REASONING_MODEL_MIN_MAX_TOKENS
+  );
+  expect(V2_TOOL_CALL_FIXTURE.routing).toEqual({ kind: "auto_routing" });
+});
+
+it("V2_MULTI_TURN_FIXTURE has a messages array with at least 3 turns and max_tokens ≥ floor", () => {
+  expect(V2_MULTI_TURN_FIXTURE.signature).toBe("v2/multi-turn/auto_routing");
+  expect(V2_MULTI_TURN_FIXTURE.messages).toBeDefined();
+  expect(V2_MULTI_TURN_FIXTURE.messages!.length).toBeGreaterThanOrEqual(3);
+  expect(V2_MULTI_TURN_FIXTURE.maxTokens).toBeGreaterThanOrEqual(
+    REASONING_MODEL_MIN_MAX_TOKENS
+  );
+  expect(V2_MULTI_TURN_FIXTURE.routing).toEqual({ kind: "auto_routing" });
+});
+
+it("V2_SAFETY_JAILBREAK_FIXTURE has expectRefusal set and max_tokens ≥ floor", () => {
+  expect(V2_SAFETY_JAILBREAK_FIXTURE.signature).toBe(
+    "v2/safety/jailbreak-block"
+  );
+  expect(V2_SAFETY_JAILBREAK_FIXTURE.expectRefusal).toBe(true);
+  expect(V2_SAFETY_JAILBREAK_FIXTURE.maxTokens).toBeGreaterThanOrEqual(
+    REASONING_MODEL_MIN_MAX_TOKENS
+  );
+  expect(V2_SAFETY_JAILBREAK_FIXTURE.routing).toEqual({ kind: "auto_routing" });
 });
 
 it("currentProbeSignatures omits family signatures when the snapshot predates the families field (backcompat)", () => {
@@ -273,6 +316,9 @@ it("every Full-tier fixture passes a max_tokens cap that clears the reasoning-mo
   const fixtures = await buildV2Fixtures({
     loadModels: async () => MODELS,
   });
+  // Includes the three new capability probes (tool-call, multi-turn,
+  // safety/jailbreak) — each must also declare max_tokens ≥ 1024 because
+  // auto_routing may land on a reasoning model that needs the headroom.
   for (const fixture of fixtures) {
     expect(
       fixture.maxTokens,

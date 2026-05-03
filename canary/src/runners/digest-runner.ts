@@ -215,6 +215,8 @@ export function summarize(
     REFUSAL_REGRESSION: 0,
     NOT_ENTITLED: 0,
     TIMEOUT: 0,
+    TOOL_CALL_MISSING: 0,
+    GUARDRAIL_BYPASS: 0,
   };
 
   let probesRun = 0;
