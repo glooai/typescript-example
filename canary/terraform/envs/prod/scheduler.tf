@@ -53,11 +53,11 @@ resource "google_cloud_scheduler_job" "canary_probe" {
     }
   }
 
-  # retry_count = 1 — with a 24h cadence a transient invocation failure would
-  # otherwise go undetected until the next day. One immediate retry is cheap
-  # insurance; the probe itself handles per-provider failures in-process.
+  # retry_count = 3 — with a 24h cadence a transient invocation failure would
+  # otherwise go undetected until the next day. Three retries give the job
+  # a fighting chance through brief GCP hiccups without burning budget.
   retry_config {
-    retry_count = 1
+    retry_count = 3
   }
 }
 
