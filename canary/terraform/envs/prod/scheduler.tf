@@ -1,12 +1,11 @@
 /**
  * Cloud Scheduler jobs that fire the Cloud Run Jobs on the cron windows:
- *   - probe  — 4x/day at midnight, 06:00, noon, 18:00 CT (≤6h outage detection)
- *   - digest — daily at 06:05 CT (right after the 06:00 probe sees fresh data)
+ *   - probe  — once daily at 06:00 CT
+ *   - digest — daily at 06:05 CT (5 min after the probe so it sees fresh data)
  *
- * Reduced from 57 runs/day (15-min daytime + hourly nighttime) to 4 runs/day
- * to minimize Cloud Run + AI token spend. With full_sweep_interval_ms=3600000
- * (1h) and a 6h probe cadence, every run triggers a Full sweep — all routing
- * modes and all direct models are exercised on each invocation.
+ * Reduced from 4x/day to 1x/day to minimize Cloud Run + AI token spend.
+ * With full_sweep_interval_ms=3600000 (1h) and a 24h probe cadence, every
+ * run triggers a Full sweep — all routing modes and direct models exercised.
  *
  * Two scheduler jobs stay within the Cloud Scheduler free tier
  * (3 jobs/account/month).
@@ -38,8 +37,8 @@ resource "google_cloud_run_v2_job_iam_member" "scheduler_invoke_digest" {
 }
 
 resource "google_cloud_scheduler_job" "canary_probe" {
-  name        = "canary-probe-6h"
-  description = "Fire canary-probe Cloud Run Job 4x/day (midnight, 06:00, noon, 18:00 CT)."
+  name        = "canary-probe-daily"
+  description = "Fire canary-probe Cloud Run Job once daily at 06:00 CT."
   project     = var.project_id
   region      = var.region
   schedule    = var.probe_schedule_cron
