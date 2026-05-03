@@ -53,10 +53,11 @@ resource "google_cloud_scheduler_job" "canary_probe" {
     }
   }
 
-  # retry_count = 0 — the probe tolerates transient failures in-process, and
-  # the next scheduled run (≤6h out) is our real retry. Retries double the cost.
+  # retry_count = 1 — with a 24h cadence a transient invocation failure would
+  # otherwise go undetected until the next day. One immediate retry is cheap
+  # insurance; the probe itself handles per-provider failures in-process.
   retry_config {
-    retry_count = 0
+    retry_count = 1
   }
 }
 
