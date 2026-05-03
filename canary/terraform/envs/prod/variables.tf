@@ -31,10 +31,9 @@ variable "results_retention_days" {
 variable "probe_schedule_cron" {
   description = "Probe-job cron expression (America/Chicago timezone)."
   type        = string
-  # Four runs/day at midnight, 06:00, noon, and 18:00 CT.
-  # Down from 57 runs/day (15-min daytime + hourly nighttime) to minimize
-  # Cloud Run + AI token spend while keeping ≤6h outage detection latency.
-  default = "0 0,6,12,18 * * *"
+  # Once daily at 06:00 CT. Down from 4x/day to minimize Cloud Run + AI token
+  # spend. The daily digest fires at 06:05 CT immediately after this probe.
+  default = "0 6 * * *"
 }
 
 variable "digest_schedule_cron" {
@@ -53,13 +52,13 @@ variable "schedule_timezone" {
 variable "full_sweep_interval_ms" {
   description = <<-EOT
     How long a Full tier sweep stays "fresh" before the probe runner
-    demands another one regardless of health. With probes running every
-    6 hours, a value of 3600000 (1h) ensures every probe triggers a Full
-    sweep (6h interval > 1h freshness threshold), giving complete model
+    demands another one regardless of health. With probes running once
+    daily, a value of 3600000 (1h) ensures every probe triggers a Full
+    sweep (24h interval > 1h freshness threshold), giving complete model
     coverage on each run. Raise to reduce per-run inference spend at the
     cost of some runs being Light-tier only; lower toward 0 to always
     force Full regardless of interval.
   EOT
   type        = number
-  default     = 3600000 # 1 hour — every 6h probe triggers a Full sweep
+  default     = 3600000 # 1 hour — every daily probe triggers a Full sweep
 }
