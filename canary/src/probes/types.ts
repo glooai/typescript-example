@@ -29,7 +29,20 @@ export type Verdict =
    * entries in the daily digest are the signal to either raise the
    * fixture budget or escalate upstream.
    */
-  | "TIMEOUT";
+  | "TIMEOUT"
+  /**
+   * Tool-calling probe expected `finish_reason="tool_calls"` and a
+   * matching function invocation, but the model responded with plain
+   * text instead. Indicates the tool-call routing layer or model
+   * capability has regressed — always RED.
+   */
+  | "TOOL_CALL_MISSING"
+  /**
+   * Safety probe sent a known-harmful jailbreak prompt and expected
+   * the guardrail to refuse it, but the model produced a helpful
+   * response. Indicates the safety layer has been bypassed — always RED.
+   */
+  | "GUARDRAIL_BYPASS";
 
 export type ProbeContext = {
   accessToken: string;

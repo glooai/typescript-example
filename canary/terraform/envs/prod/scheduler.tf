@@ -1,10 +1,10 @@
 /**
  * Cloud Scheduler jobs that fire the Cloud Run Jobs on the cron windows:
- *   - probe  — once daily at 06:00 CT
- *   - digest — daily at 06:05 CT (5 min after the probe so it sees fresh data)
+ *   - probe  — once weekly on Monday at 06:00 CT
+ *   - digest — weekly on Monday at 06:05 CT (5 min after the probe sees fresh data)
  *
- * Reduced from 4x/day to 1x/day to minimize Cloud Run + AI token spend.
- * With full_sweep_interval_ms=3600000 (1h) and a 24h probe cadence, every
+ * Reduced from daily to weekly to minimize Cloud Run + AI token spend.
+ * With full_sweep_interval_ms=3600000 (1h) and a 168h probe cadence, every
  * run triggers a Full sweep — all routing modes and direct models exercised.
  *
  * Two scheduler jobs stay within the Cloud Scheduler free tier
@@ -37,8 +37,8 @@ resource "google_cloud_run_v2_job_iam_member" "scheduler_invoke_digest" {
 }
 
 resource "google_cloud_scheduler_job" "canary_probe" {
-  name        = "canary-probe-daily"
-  description = "Fire canary-probe Cloud Run Job once daily at 06:00 CT."
+  name        = "canary-probe-weekly"
+  description = "Fire canary-probe Cloud Run Job once weekly on Monday at 06:00 CT."
   project     = var.project_id
   region      = var.region
   schedule    = var.probe_schedule_cron
@@ -53,8 +53,8 @@ resource "google_cloud_scheduler_job" "canary_probe" {
     }
   }
 
-  # retry_count = 3 — with a 24h cadence a transient invocation failure would
-  # otherwise go undetected until the next day. Three retries give the job
+  # retry_count = 3 — with a weekly cadence a transient invocation failure would
+  # otherwise go undetected until next Monday. Three retries give the job
   # a fighting chance through brief GCP hiccups without burning budget.
   retry_config {
     retry_count = 3
@@ -62,8 +62,8 @@ resource "google_cloud_scheduler_job" "canary_probe" {
 }
 
 resource "google_cloud_scheduler_job" "canary_digest" {
-  name        = "canary-digest-daily"
-  description = "Fire canary-digest Cloud Run Job daily at 06:05 CT."
+  name        = "canary-digest-weekly"
+  description = "Fire canary-digest Cloud Run Job weekly on Monday at 06:05 CT."
   project     = var.project_id
   region      = var.region
   schedule    = var.digest_schedule_cron
