@@ -151,3 +151,61 @@ resource "google_cloud_run_v2_job" "canary_digest" {
     google_storage_bucket_iam_member.canary_runner_object_admin,
   ]
 }
+
+resource "google_cloud_run_v2_job" "canary_watchdog" {
+  name                = "canary-watchdog"
+  location            = var.region
+  project             = var.project_id
+  deletion_protection = false
+
+  template {
+    template {
+      service_account = google_service_account.canary_runner.email
+      # Watchdog is GCS list + Slack post — no inference calls, very fast.
+      timeout     = "120s"
+      max_retries = 1
+
+      containers {
+        image = local.image_uri
+
+        env {
+          name  = "CANARY_MODE"
+          value = "watchdog"
+        }
+
+        dynamic "env" {
+          for_each = local.shared_env
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
+        }
+
+        dynamic "env" {
+          for_each = local.shared_secrets
+          content {
+            name = env.value.env_name
+            value_source {
+              secret_key_ref {
+                secret  = env.value.secret_key
+                version = "latest"
+              }
+            }
+          }
+        }
+
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = "256Mi"
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [
+    google_secret_manager_secret_iam_member.canary_runner_accessor,
+    google_storage_bucket_iam_member.canary_runner_object_admin,
+  ]
+}

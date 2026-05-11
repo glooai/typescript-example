@@ -24,3 +24,4 @@ pr.md
 # Local plan binaries produced by `terraform plan -out=...` — never commit.
 tfplan.bin
 *.tfplan
+notification-channels.auto.tfvars

@@ -30,6 +30,7 @@ import {
 import { fetchV2Models } from "./fixtures/v2-models.js";
 import { runProbes } from "./runners/probe-runner.js";
 import { runDigest } from "./runners/digest-runner.js";
+import { runWatchdog } from "./runners/watchdog-runner.js";
 import {
   loadAndDecideTier,
   resolveFullSweepIntervalMs,
@@ -139,6 +140,21 @@ export async function main(): Promise<void> {
         runsFound: summary.runsFound,
         probesRun: summary.probesRun,
         severity: summary.severityCounts,
+      })
+    );
+    return;
+  }
+
+  if (config.mode === "watchdog") {
+    const summary = await runWatchdog(config, { gcs, slack });
+    // eslint-disable-next-line no-console
+    console.log(
+      JSON.stringify({
+        level: "info",
+        msg: "watchdog run complete",
+        artifactsFound: summary.artifactsFound,
+        windowHours: summary.windowHours,
+        newest: summary.newestArtifact,
       })
     );
     return;

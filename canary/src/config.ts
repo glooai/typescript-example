@@ -3,7 +3,7 @@
  * variables populated by Cloud Run from Secret Manager + job env.
  */
 
-export type CanaryMode = "probe" | "digest";
+export type CanaryMode = "probe" | "digest" | "watchdog";
 
 export type CanaryConfig = {
   mode: CanaryMode;
@@ -37,9 +37,9 @@ function requireEnv(name: string): string {
 }
 
 export function parseMode(raw: string | undefined): CanaryMode {
-  if (raw === "probe" || raw === "digest") return raw;
+  if (raw === "probe" || raw === "digest" || raw === "watchdog") return raw;
   throw new Error(
-    `CANARY_MODE must be "probe" or "digest" (received: ${raw ?? "unset"})`
+    `CANARY_MODE must be "probe", "digest", or "watchdog" (received: ${raw ?? "unset"})`
   );
 }
 

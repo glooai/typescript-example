@@ -48,10 +48,37 @@ variable "digest_schedule_cron" {
   default = "15 6 * * 1"
 }
 
+variable "watchdog_schedule_cron" {
+  description = "Watchdog-job cron expression (America/Chicago timezone)."
+  type        = string
+  # 06:00 CT Wednesday — 48h after the Monday probe. Gives the probe a full
+  # 48h grace window before the watchdog fires. If no GCS artifacts are found
+  # for the last 8 days, the watchdog posts a Slack alert and logs
+  # event="probe_missed" (picked up by the Cloud Monitoring log-based metric).
+  default = "0 6 * * 3"
+}
+
 variable "schedule_timezone" {
   description = "IANA timezone for the scheduler cron entries."
   type        = string
   default     = "America/Chicago"
+}
+
+variable "probe_alert_email" {
+  description = <<-EOT
+    Email address for Cloud Monitoring probe-silence alerts.
+    When non-empty, creates a google_monitoring_notification_channel of
+    type "email" and wires it into the probe_missed alert policy.
+
+    Populate in notification-channels.auto.tfvars (gitignored):
+      probe_alert_email = "eng-alerts@example.com"
+
+    The watchdog runner also posts to Slack directly (using the
+    ALERTS_SLACK_BOT_TOKEN + ALERTS_SLACK_CHANNEL_ID secrets already in
+    Secret Manager), so this email channel is a secondary redundant alert.
+  EOT
+  type        = string
+  default     = ""
 }
 
 variable "alert_notification_channels" {
