@@ -66,8 +66,8 @@ variable "alert_notification_channels" {
         "projects/glooai/notificationChannels/1234567890"
       ]
   EOT
-  type    = list(string)
-  default = []
+  type        = list(string)
+  default     = []
 }
 
 variable "full_sweep_interval_ms" {

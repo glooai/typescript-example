@@ -49,10 +49,10 @@ resource "google_monitoring_alert_policy" "probe_execution_silence" {
         # Aggregate over 1-day windows. A weekly job produces exactly one
         # data point per window; aligning by day gives the absence detector
         # a clean signal to compare against the 8-day threshold.
-        alignment_period   = "86400s"
-        per_series_aligner = "ALIGN_SUM"
+        alignment_period     = "86400s"
+        per_series_aligner   = "ALIGN_SUM"
         cross_series_reducer = "REDUCE_SUM"
-        group_by_fields    = ["resource.labels.job_name"]
+        group_by_fields      = ["resource.labels.job_name"]
       }
     }
   }
