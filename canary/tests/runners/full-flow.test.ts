@@ -175,21 +175,26 @@ it("loadWindow walks GCS prefixes and returns run artifacts sorted by startedAt"
   expect(artifacts.map((a) => a.runId)).toEqual(["run-a", "run-b"]);
 });
 
-it("loadWindow filters artifacts older than 24h (R3)", async () => {
-  // buildRunPrefixes intentionally spans 26 hours to cover day-boundary
-  // UTC quirks. Before the R3 fix, loadWindow returned every artifact
-  // matching those prefixes — including runs 25-26h old — so the
-  // 'daily digest' could actually cover ~26 hours.
+it("loadWindow filters artifacts older than the 168h window (R3)", async () => {
+  // buildRunPrefixes intentionally spans WINDOW_HOURS + 2 hours to cover
+  // day-boundary UTC quirks. Before the R3 fix, loadWindow returned every
+  // artifact matching those prefixes without filtering by startedAt, so the
+  // digest could silently include runs outside the promised window.
+  //
+  // WINDOW_HOURS is now 168 (7 days). The "old" artifact is placed 169h
+  // before `now` — just outside the window — and must be excluded. The
+  // "fresh" artifact is 1h before `now` and must be included.
   const now = new Date("2026-04-21T07:00:00Z");
+  // 169h before now = 2026-04-14T06:00:00Z
   const files: Record<string, unknown> = {
-    // 25h before `now` — OUTSIDE the 24h window, should be excluded.
-    "runs/2026/04/20/06-old.json": {
+    // 169h before `now` — OUTSIDE the 168h window, should be excluded.
+    "runs/2026/04/14/06-old.json": {
       runId: "old",
-      startedAt: "2026-04-20T06:00:00Z",
-      completedAt: "2026-04-20T06:00:30Z",
+      startedAt: "2026-04-14T06:00:00Z",
+      completedAt: "2026-04-14T06:00:30Z",
       outcomes: [],
     },
-    // 1h before `now` — INSIDE the 24h window, should be included.
+    // 1h before `now` — INSIDE the 168h window, should be included.
     "runs/2026/04/21/06-fresh.json": {
       runId: "fresh",
       startedAt: "2026-04-21T06:00:00Z",

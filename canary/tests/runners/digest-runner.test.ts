@@ -55,15 +55,18 @@ it("formats human-readable byte sizes", () => {
   expect(humanBytes(3 * 1024 * 1024 * 1024)).toBe("3.00GB");
 });
 
-it("builds a deduplicated 24h worth of hourly GCS prefixes", () => {
+it("builds a deduplicated 168h (7-day) worth of hourly GCS prefixes", () => {
   const prefixes = buildRunPrefixes(NOW);
-  expect(prefixes.length).toBeGreaterThanOrEqual(24);
+  // WINDOW_HOURS=168 + 2h buffer → 170 unique hourly prefixes
+  expect(prefixes.length).toBeGreaterThanOrEqual(168);
   // Each entry is a YYYY/MM/DD/HH-style prefix
   for (const p of prefixes) {
     expect(p).toMatch(/^runs\/\d{4}\/\d{2}\/\d{2}\/\d{2}$/);
   }
   // Latest hour (the one `NOW` sits in) is included
   expect(prefixes).toContain("runs/2026/04/21/07");
+  // An hour from 7 days ago should also be in range
+  expect(prefixes).toContain("runs/2026/04/14/07");
 });
 
 it("summarizes severity + verdict counts and per-probe latency quantiles", () => {
@@ -226,6 +229,23 @@ it("top-level digest uses an all-green header and a celebratory body when nothin
   expect(post).toContain("All probes fully green");
   // Green probes are detailed in the thread, not in the top-level body.
   expect(post).not.toMatch(/`v2\/a`/);
+  // Header now says "Weekly Digest"
+  expect(post).toContain("Weekly Digest");
+});
+
+it("top-level digest uses rotating-light when runsFound is 0 (watchdog guard)", () => {
+  // An empty window — no GCS artifacts — should NEVER render green.
+  // Green + "Probes run: 0" was the confusing pattern from the 2026-05-11
+  // race condition incident; this test is the regression guard.
+  const summary = summarize(
+    [],
+    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
+    NOW
+  );
+  expect(summary.runsFound).toBe(0);
+  const post = formatDigestTopLevel(summary);
+  expect(post).toContain(":rotating_light:");
+  expect(post).not.toContain(":large_green_circle:");
 });
 
 it("top-level digest uses the rotating-light emoji when any probe is RED", () => {
@@ -361,7 +381,7 @@ it("formatProbeFailureThread explains what N/M pass means for a red probe", () =
   });
 
   expect(text).toContain("*Breakdown for `v1/llama3-70b`*");
-  expect(text).toContain("Runs in the 24h window: 8");
+  expect(text).toContain("Runs in the weekly window: 8");
   expect(text).toContain("Passed: 5 · Failed: 3");
   expect(text).toContain("FAIL × 3");
   // Mix combines 503 (×2) and network error (×1).
