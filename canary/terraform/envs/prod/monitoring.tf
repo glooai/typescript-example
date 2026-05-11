@@ -34,6 +34,11 @@ resource "google_monitoring_alert_policy" "probe_execution_silence" {
   combiner     = "OR"
   enabled      = true
 
+  # Ensure the deployer SA has roles/monitoring.alertPolicyEditor before this
+  # resource is created. Without depends_on, Terraform may attempt the API call
+  # concurrently with the IAM grant, racing the GCP IAM propagation window.
+  depends_on = [google_project_iam_member.deployer_monitoring_editor]
+
   conditions {
     display_name = "No canary-probe execution recorded in the last 8 days"
 
