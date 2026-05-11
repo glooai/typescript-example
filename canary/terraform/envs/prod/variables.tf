@@ -54,6 +54,22 @@ variable "schedule_timezone" {
   default     = "America/Chicago"
 }
 
+variable "alert_notification_channels" {
+  description = <<-EOT
+    List of Cloud Monitoring notification channel resource names to receive
+    probe-silence alerts. Accepts full resource name strings of the form:
+      projects/<project>/notificationChannels/<id>
+
+    Default is empty (alert policy is created but sends no notifications).
+    Populate this in a .tfvars file or CI pipeline to wire up email / PD:
+      alert_notification_channels = [
+        "projects/glooai/notificationChannels/1234567890"
+      ]
+  EOT
+  type    = list(string)
+  default = []
+}
+
 variable "full_sweep_interval_ms" {
   description = <<-EOT
     How long a Full tier sweep stays "fresh" before the probe runner
