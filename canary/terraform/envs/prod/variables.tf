@@ -32,15 +32,20 @@ variable "probe_schedule_cron" {
   description = "Probe-job cron expression (America/Chicago timezone)."
   type        = string
   # Once weekly on Monday at 06:00 CT. Down from daily to minimize Cloud Run +
-  # AI token spend. The weekly digest fires at 06:05 CT on the same Monday.
+  # AI token spend. The weekly digest fires at 06:15 CT on the same Monday.
   default = "0 6 * * 1"
 }
 
 variable "digest_schedule_cron" {
   description = "Digest-job cron expression (America/Chicago timezone)."
   type        = string
-  # 06:05 CT Monday — 5 minutes after the 06:00 probe so the digest sees fresh data
-  default = "5 6 * * 1"
+  # 06:15 CT Monday — 15 minutes after the 06:00 probe. A full sweep with
+  # direct-model + family + routing probes takes up to ~10 min end-to-end
+  # (OAuth → per-probe HTTP → GCS write). The previous 5-min gap was too
+  # tight: the digest's loadWindow query fired before the probe's GCS write
+  # completed, surfacing 0 artifacts and posting a misleading "no probes
+  # registered" digest. 15 min gives the probe a comfortable margin.
+  default = "15 6 * * 1"
 }
 
 variable "schedule_timezone" {

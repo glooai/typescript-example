@@ -1,7 +1,7 @@
 /**
  * Cloud Scheduler jobs that fire the Cloud Run Jobs on the cron windows:
  *   - probe  — once weekly on Monday at 06:00 CT
- *   - digest — weekly on Monday at 06:05 CT (5 min after the probe sees fresh data)
+ *   - digest — weekly on Monday at 06:15 CT (15 min after the probe, see variables.tf)
  *
  * Reduced from daily to weekly to minimize Cloud Run + AI token spend.
  * With full_sweep_interval_ms=3600000 (1h) and a 168h probe cadence, every

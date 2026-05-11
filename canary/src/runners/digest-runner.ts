@@ -466,10 +466,21 @@ export function formatDigestTopLevel(summary: DigestSummary): string {
 
   let notableBlock: string;
   if (notableProbes.length === 0) {
-    notableBlock =
-      summary.perProbe.length === 0
-        ? "_(no probes registered)_"
-        : "_All probes fully green — see thread for per-probe details._";
+    if (summary.runsFound === 0) {
+      // No run artifacts in the 24h window at all. This usually means the
+      // probe job hasn't fired yet today (e.g. a race where the digest
+      // started before the probe wrote its GCS artifact) or the probe
+      // scheduler is misconfigured. Distinguish this clearly from the
+      // "probes ran and all were green" case so an on-caller can tell the
+      // difference at a glance.
+      notableBlock =
+        "_(no probe runs found in the last 24h — check that the probe scheduler is running)_";
+    } else {
+      notableBlock =
+        summary.perProbe.length === 0
+          ? "_(probes ran but all outcomes were filtered — check allowedSignatures)_"
+          : "_All probes fully green — see thread for per-probe details._";
+    }
   } else {
     notableBlock = notableLines;
   }
