@@ -1,6 +1,6 @@
 /**
- * Digest runner — summarizes the last 24h of probe runs into one Slack
- * top-level post plus a structured thread.
+ * Digest runner — summarizes the last 7 days (168h) of probe runs into one
+ * Slack top-level post plus a structured thread.
  *
  * Top-level post shows ONLY the signal:
  *   - Every probe whose worst severity in the window was RED
@@ -108,17 +108,23 @@ export type DigestSummary = {
   };
 };
 
-/** ms in one hour — used for 24h window math. */
+/** ms in one hour — used for window math. */
 const ONE_HOUR_MS = 3_600_000;
 
-/** How far back the digest window looks — the daily-digest promise. */
-const WINDOW_HOURS = 24;
+/**
+ * How far back the digest window looks. Set to 168h (7 days) to match the
+ * weekly probe cadence — a 24h window would only ever contain the single
+ * Monday morning run and would silently look empty on any other day of the
+ * week. 168h ensures the weekly digest always has a full week's worth of
+ * probe artifacts to summarize, regardless of when exactly the digest job fires.
+ */
+const WINDOW_HOURS = 168;
 
 /**
- * List run artifacts strictly within the last 24h. We over-fetch hourly
- * prefixes (26 hours covers day-boundary UTC offsets cleanly) and then
- * filter the returned artifacts by their `startedAt` so the digest
- * reflects exactly the promised 24h window, not ~26h.
+ * List run artifacts strictly within the last WINDOW_HOURS. We over-fetch
+ * hourly prefixes (WINDOW_HOURS + 2 covers day-boundary UTC offsets cleanly)
+ * and then filter the returned artifacts by their `startedAt` so the digest
+ * reflects exactly the promised window, not ~WINDOW_HOURS+2h.
  */
 export async function loadWindow(
   gcs: GcsClient,
@@ -146,13 +152,14 @@ export async function loadWindow(
 }
 
 /**
- * Build the set of GCS prefixes that cover the last 24h. Because we partition
- * by hour, the worst case is 2 hourly prefixes per day-boundary — we just
- * enumerate the 24 hours ending at `now`.
+ * Build the set of GCS prefixes that cover the last WINDOW_HOURS. Because we
+ * partition by hour, we enumerate WINDOW_HOURS + 2 hours ending at `now` to
+ * cleanly cover day-boundary UTC offsets — the extra 2h acts as a buffer so
+ * no artifact at the edge of the window is missed due to clock skew.
  */
 export function buildRunPrefixes(now: Date): string[] {
   const out = new Set<string>();
-  for (let hoursBack = 0; hoursBack < 26; hoursBack++) {
+  for (let hoursBack = 0; hoursBack < WINDOW_HOURS + 2; hoursBack++) {
     const t = new Date(now.getTime() - hoursBack * 3_600_000);
     const y = t.getUTCFullYear();
     const m = String(t.getUTCMonth() + 1).padStart(2, "0");
@@ -445,8 +452,15 @@ export async function runDigest(
 export function formatDigestTopLevel(summary: DigestSummary): string {
   const red = summary.severityCounts.RED;
   const total = summary.probesRun;
-  const emoji = red > 0 ? ":rotating_light:" : ":large_green_circle:";
-  const header = `${emoji} *Gloo AI Canary — 24h Digest*`;
+  // Guard 2 (watchdog): zero-run digest must NOT render green. A green header
+  // with "Probes run: 0" is indistinguishable from a misconfigured scheduler
+  // and caused confusion on 2026-05-11 (see RCA). Use the rotating-light for
+  // any of: RED probes present, or no run artifacts found at all.
+  const emoji =
+    summary.runsFound === 0 || red > 0
+      ? ":rotating_light:"
+      : ":large_green_circle:";
+  const header = `${emoji} *Gloo AI Canary — Weekly Digest*`;
 
   // Only show probes that need attention in the top-level post. Every
   // probe that was fully green in the window gets rolled up into the
@@ -503,7 +517,7 @@ export function formatDigestTopLevel(summary: DigestSummary): string {
 
   return [
     header,
-    `*Window:* ${summary.windowStart} → ${summary.windowEnd}`,
+    `*Window:* ${summary.windowStart} → ${summary.windowEnd} (last 7 days)`,
     `*Probes run:* ${total} across ${summary.runsFound} runs`,
     `*Severity:* 🔴 ${summary.severityCounts.RED}  🟡 ${summary.severityCounts.YELLOW}  🟢 ${summary.severityCounts.GREEN}`,
     "",
@@ -601,7 +615,7 @@ export function formatProbeFailureThread(probe: PerProbeEntry): string {
 
   return [
     `🔴 *Breakdown for \`${probe.signature}\`* — ${probe.label}`,
-    `• Runs in the 24h window: ${probe.total} (one outcome per probe-runner execution)`,
+    `• Runs in the weekly window: ${probe.total} (one outcome per probe-runner execution)`,
     `• Passed: ${probe.passing} · Failed: ${probe.failing}`,
     `• Failure verdicts: ${verdictMix || "_none_"}`,
     `• HTTP statuses on failures: ${statusMix || "_none_"}`,
@@ -631,7 +645,7 @@ export function formatProbeYellowThread(probe: PerProbeEntry): string {
 
   return [
     `🟡 *Breakdown for \`${probe.signature}\`* — ${probe.label}`,
-    `• Runs in the 24h window: ${probe.total} (one outcome per probe-runner execution)`,
+    `• Runs in the weekly window: ${probe.total} (one outcome per probe-runner execution)`,
     `• Passed: ${probe.passing} · Non-pass: ${probe.failing} · YELLOW signals: ${probe.yellowing}`,
     `• YELLOW verdicts: ${verdictMix || "_none_"}`,
     `• HTTP statuses on YELLOW outcomes: ${statusMix || "_none_"}`,
