@@ -10,7 +10,8 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "canary:local": "tsx src/index.ts"
+    "canary:local": "tsx src/index.ts",
+    "canary:repro": "tsx src/repro.ts"
   },
   "dependencies": {
     "@glooai/scripts": "workspace:*",

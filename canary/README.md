@@ -92,6 +92,29 @@ CANARY_MODE=probe pnpm --filter @glooai/canary canary:local
 CANARY_MODE=digest pnpm --filter @glooai/canary canary:local
 ```
 
+### Reproducing a RED (before filing a bug)
+
+When triage surfaces a RED signature, reproduce it on demand before drafting any
+Gloo bug report. `canary:repro` replays the **exact** scheduled-probe request
+path (`buildV2Probe` → OAuth → `POST /ai/v2/chat/completions` → `assessV2`) for
+one or more signatures, so the request is byte-identical to what the canary
+sends.
+
+```bash
+cd canary
+pnpm canary:repro --list                                   # valid signatures
+pnpm canary:repro v2/model/gloo-deepseek-v3.2-speciale \
+                  v2/model/gloo-deepseek-v3.2 --repeat 2   # failing + control
+pnpm canary:repro v2/model/gloo-google-gemini-2.5-pro --no-max-tokens --repeat 3
+```
+
+Flags: `--repeat N` (run each N times — use for retryable 5xx), `--max-tokens N`
+and `--no-max-tokens` (vary the budget to rule out the reasoning-model
+`max_tokens` class — see `.context/adrs/2026-04-27-reasoning-model-max-tokens-rca.md`).
+Always run a sibling/base model as a control: a control that passes with the
+identical body is what proves the fault is model-specific, not the request.
+Capture the result + trace_ids in an RCA under `.context/adrs/`.
+
 ## Deployment
 
 See [`terraform/README.md`](terraform/README.md).
