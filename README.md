@@ -62,7 +62,32 @@ pnpm glooai:items:metadata  # Item metadata
 pnpm glooai:search          # Semantic search
 pnpm glooai:jwt             # Decode and inspect access token
 pnpm glooai:sonnet-4-repro  # Side-by-side: V1 Sonnet 4 vs. V2 Sonnet 4.5 / Haiku 4.5
+pnpm glooai:whats-new       # Validate the 2026-05-26 release notes (models, cache, errors)
 ```
+
+### What's New — 2026-05-26 release validators
+
+`scripts/src/whats-new-2026-05-26.ts` programmatically validates the subset of
+the [Week of May 26, 2026 changelog](https://docs.gloo.com/) that can be checked
+automatically from a single OAuth client. Three checks, each backed by a pure,
+unit-tested classifier:
+
+| #   | Release-note claim                                        | How it's validated                                                                                                                                                                                             |
+| --- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **11 new models + Gemini 3.1 Flash Lite → GA**            | Asserts each model is present in the authoritative `/platform/v2/models` registry **by display name** (not by guessing alias IDs); the GA check additionally asserts the entry is no longer flagged `preview`. |
+| 2   | **`cache_tokens` / `cache_hit_rate` usage metrics**       | Sends a completion and validates both new usage fields are present and well-formed (non-negative tokens; hit-rate in `[0, 1]`).                                                                                |
+| 3   | **Provider validation → actionable 4xx, not generic 500** | Sends a deliberately invalid model and classifies the response (`ACTIONABLE_CLIENT_ERROR` vs the old `GENERIC_SERVER_ERROR`).                                                                                  |
+
+```bash
+pnpm glooai:whats-new
+```
+
+A model reported `ABSENT` is surfaced, not silently dropped — it may indicate a
+not-yet-entitled / region-routing gap for this client rather than an unlaunched
+model (confirm in the [Studio Model Explorer](https://studio.ai.gloo.com/models)).
+Claims that are **not** cheaply auto-validatable from here (Studio billing/usage
+UI, streaming reliability, guardrail tuning, GlooCode, Data Engine org caps, docs
+restructuring) are intentionally out of scope.
 
 ### Sonnet 4 V1→V2 reduced repro
 
