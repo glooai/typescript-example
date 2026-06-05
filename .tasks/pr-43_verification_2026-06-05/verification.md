@@ -1,35 +1,35 @@
 # Verification — PR #43
 
-| Field | Value |
-| --- | --- |
-| Ticket | none (PR URL target) |
-| Branch | feat/whats-new-2026-05-26-validators |
-| PR | https://github.com/glooai/typescript-example/pull/43 |
-| Base | main |
-| Mode | fix |
-| Rebase status | current |
-| Timestamp | 2026-06-05T07:10:00Z |
-| Overall | PASSED |
-| Verdict | CONTINUE |
+| Field         | Value                                                |
+| ------------- | ---------------------------------------------------- |
+| Ticket        | none (PR URL target)                                 |
+| Branch        | feat/whats-new-2026-05-26-validators                 |
+| PR            | https://github.com/glooai/typescript-example/pull/43 |
+| Base          | main                                                 |
+| Mode          | fix                                                  |
+| Rebase status | current                                              |
+| Timestamp     | 2026-06-05T07:10:00Z                                 |
+| Overall       | PASSED                                               |
+| Verdict       | CONTINUE                                             |
 
 ## Quality Gate
 
-| Check | Result |
-| --- | --- |
-| Build | PASS |
-| Lint | PASS |
-| Typecheck | PASS |
-| Test | PASS |
-| Format | PASS |
+| Check     | Result |
+| --------- | ------ |
+| Build     | PASS   |
+| Lint      | PASS   |
+| Typecheck | PASS   |
+| Test      | PASS   |
+| Format    | PASS   |
 
 All 5 checks passed locally (turbo monorepo: `@glooai/scripts`, `@glooai/canary`, `gloo-chatbot`). No fixes required at the quality gate stage.
 
 ## CI Auto-Fix
 
-| Pass | Attempts | Outcome |
-| --- | --- | --- |
-| Pass 1 | 0 | green |
-| Pass 2 | 0 | green |
+| Pass   | Attempts | Outcome |
+| ------ | -------- | ------- |
+| Pass 1 | 0        | green   |
+| Pass 2 | 0        | green   |
 
 CI on the original HEAD (`fdbcea8`) was already fully green (7/7 checks). After the preflight fix commit (`85029f7`), CI passed again cleanly (7/7 checks).
 
@@ -38,6 +38,7 @@ CI on the original HEAD (`fdbcea8`) was already fully green (7/7 checks). After 
 **Rounds:** 3 of 5 · **Threads resolved:** 0 · **Final verdict:** CLEAN
 
 Preflight code review ran 3 rounds. Found and fixed 2 nits:
+
 - **R1** (`scripts/src/whats-new-2026-05-26.ts:401`): replaced sequential awaits in array literal with `Promise.all` for parallel probe execution
 - **R2** (`scripts/tests/whats-new-2026-05-26.test.ts:92`): corrected test description "11 new models" → "10 distinct new-model entries" (factually matched assertion)
 
