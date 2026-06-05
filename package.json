@@ -20,6 +20,7 @@
     "glooai:items:metadata": "pnpm --filter @glooai/scripts run glooai:items:metadata",
     "glooai:search": "pnpm --filter @glooai/scripts run glooai:search",
     "glooai:jwt": "pnpm --filter @glooai/scripts run glooai:jwt",
+    "glooai:whats-new": "pnpm --filter @glooai/scripts run glooai:whats-new",
     "prepare": "husky"
   },
   "devDependencies": {
