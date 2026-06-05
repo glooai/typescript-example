@@ -89,7 +89,7 @@ function fullRegistry(): RegistryModel[] {
 
 // --- Capability 1: model availability -------------------------------------
 
-it("encodes 11 new models plus a separate GA-promotion expectation", () => {
+it("encodes 10 distinct new-model entries plus a GA-promotion expectation", () => {
   expect(EXPECTED_NEW_MODELS).toHaveLength(10); // distinct named entries
   expect(EXPECTED_GA_PROMOTION.nameExcludes).toContain("preview");
 });

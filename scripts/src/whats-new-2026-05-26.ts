@@ -398,11 +398,11 @@ export async function runWhatsNewChecks(
   }
   // Model registry is unauthenticated, but we fetch it inside the same run
   // so the report is a single coherent snapshot.
-  const [models, cache, errorClarity] = [
-    await checkModelAvailability(),
-    await checkPromptCache(accessToken),
-    await checkErrorClarity(accessToken),
-  ];
+  const [models, cache, errorClarity] = await Promise.all([
+    checkModelAvailability(),
+    checkPromptCache(accessToken),
+    checkErrorClarity(accessToken),
+  ]);
   return { models, cache, errorClarity };
 }
 
