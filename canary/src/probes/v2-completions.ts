@@ -59,6 +59,17 @@ export type V2CompletionsFixture = {
    * `GUARDRAIL_BYPASS` (RED). Takes precedence over `benign` when set.
    */
   expectRefusal?: boolean;
+  /**
+   * When true, the probe expects the platform to REJECT the request with a
+   * 4xx — used for image-only models/families (output_modalities without
+   * "text"), which cannot produce a text completion and must be sent to
+   * `/v1/responses` instead (ai-api GAI-6788). A 4xx is `PASS` (GREEN): the
+   * platform correctly refused. A 2xx is `UNEXPECTED_SUCCESS` (RED): the
+   * image-only model was processed on the text endpoint (the bug GAI-6788
+   * fixes — a slow, billable, empty completion). 5xx stays a server-fault
+   * RED. Takes precedence over the content/refusal paths when set.
+   */
+  expectRejection?: boolean;
   routing:
     | { kind: "auto_routing" }
     | {
@@ -223,6 +234,42 @@ export function assessV2(
       details: {
         reason: "guardrail-rejected-at-http-layer",
         httpStatus: status,
+      },
+    };
+  }
+
+  // Image-only model/family probe: the platform MUST reject it on the text
+  // endpoint. Any 4xx is the correct outcome (PASS) — a pinned image-only
+  // model 400s via the GAI-6788 text-output guard; an all-image family 400s
+  // as an unknown text family. A 2xx means the image-only model was actually
+  // processed (UNEXPECTED_SUCCESS, RED — the GAI-6788 bug). 5xx falls through
+  // to the server-fault path below. Checked before the 403/non-2xx branches
+  // so an entitlement 403 on an image-only model still reads as a valid
+  // rejection rather than NOT_ENTITLED.
+  if (fixture.expectRejection && status >= 400 && status < 500) {
+    return {
+      ...base,
+      model: modelFromFixture,
+      verdict: "PASS",
+      severity: "GREEN",
+      contentPreview: null,
+      details: {
+        reason: "image-only-correctly-rejected",
+        httpStatus: status,
+      },
+    };
+  }
+  if (fixture.expectRejection && status >= 200 && status < 300) {
+    return {
+      ...base,
+      model: modelFromFixture,
+      verdict: "UNEXPECTED_SUCCESS",
+      severity: "RED",
+      contentPreview: null,
+      details: {
+        reason: "image-only-model-not-rejected-on-text-endpoint",
+        httpStatus: status,
+        body: rawBody.slice(0, 500),
       },
     };
   }

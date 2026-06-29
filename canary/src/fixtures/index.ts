@@ -37,7 +37,11 @@ import type {
   ToolDefinition,
   V2CompletionsFixture,
 } from "../probes/v2-completions.js";
-import { fetchV2Models, type V2ModelSummary } from "./v2-models.js";
+import {
+  fetchV2Models,
+  isTextOutputModel,
+  type V2ModelSummary,
+} from "./v2-models.js";
 
 // Benign tech-writing prompt — matches the refusal-regression pattern we
 // want to keep detecting (see scripts/tests/completions-v2-moderation for
@@ -170,6 +174,12 @@ export function familySlug(family: string): string {
  * canonical casing straight from the registry — so the fixture's
  * `model_family` request body stays in lock-step with whatever the
  * server currently accepts, even if Gloo adjusts casing over time.
+ *
+ * Every distinct family is returned, image-only families included.
+ * Image-only families (e.g. "Black Forest Labs", "ByteDance", "xAI")
+ * are still probed — but as `expectRejection` fixtures that assert the
+ * platform 400s them (`model_family` routing has no text member to
+ * select), see `imageOnlyFamilies` + `buildV2FamilyFixtures`.
  */
 export function extractFamilies(models: V2ModelSummary[]): string[] {
   const set = new Set<string>();
@@ -179,6 +189,32 @@ export function extractFamilies(models: V2ModelSummary[]): string[] {
     }
   }
   return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Family names whose every registry member is image-only (no "text" in
+ * output_modalities). The platform's `model_family` router can't select a
+ * text-completable model for these, so a v2 chat-completions request is
+ * rejected with a 4xx — which the family probe asserts via `expectRejection`.
+ * A mixed family (at least one text-output member) is NOT image-only: the
+ * router picks the text member, so its probe expects a normal 2xx. Derived
+ * live so a family flips the minute its membership changes — e.g. if xAI
+ * ships a text model, "xAI" drops out of this set and its probe reverts to
+ * expecting success.
+ */
+export function imageOnlyFamilies(models: V2ModelSummary[]): Set<string> {
+  const byFamily = new Map<string, V2ModelSummary[]>();
+  for (const m of models) {
+    if (!m.family || !m.family.trim()) continue;
+    const arr = byFamily.get(m.family) ?? [];
+    arr.push(m);
+    byFamily.set(m.family, arr);
+  }
+  const out = new Set<string>();
+  for (const [family, members] of byFamily) {
+    if (members.every((m) => !isTextOutputModel(m))) out.add(family);
+  }
+  return out;
 }
 
 /**
@@ -194,7 +230,8 @@ export function extractFamilies(models: V2ModelSummary[]): string[] {
  * before. Labels use the canonical casing for human readability.
  */
 export function buildV2FamilyFixtures(
-  families: string[]
+  families: string[],
+  imageOnly: Set<string> = new Set()
 ): V2CompletionsFixture[] {
   return families
     .slice()
@@ -206,6 +243,10 @@ export function buildV2FamilyFixtures(
         prompt: BENIGN_PROMPT,
         benign: true,
         maxTokens: V2_FULL_PROBE_MAX_TOKENS,
+        // All-image-only families have no text member for model_family
+        // routing to select, so the platform rejects them — assert the 4xx
+        // instead of expecting a completion.
+        ...(imageOnly.has(family) ? { expectRejection: true } : {}),
         routing: { kind: "model_family", family },
       })
     );
@@ -214,14 +255,18 @@ export function buildV2FamilyFixtures(
 /**
  * Build the Full-tier routing fixtures from a models response.
  * `auto_routing` is always present; `model_family` fixtures are
- * derived from the distinct `family` values in the registry.
+ * derived from the distinct `family` values in the registry, with
+ * all-image-only families marked `expectRejection`.
  */
 export function buildV2RoutingFixtures(
   models: V2ModelSummary[]
 ): V2CompletionsFixture[] {
   return [
     V2_AUTO_ROUTING_FIXTURE,
-    ...buildV2FamilyFixtures(extractFamilies(models)),
+    ...buildV2FamilyFixtures(
+      extractFamilies(models),
+      imageOnlyFamilies(models)
+    ),
   ];
 }
 
@@ -248,6 +293,13 @@ export function buildV2DirectModelFixtures(
         benign: true,
         timeoutMs: V2_DIRECT_PROBE_TIMEOUT_MS,
         maxTokens: V2_FULL_PROBE_MAX_TOKENS,
+        // Image-only models (no "text" in output_modalities — FLUX,
+        // Seedream, Grok Imagine) can't return a text completion on the V2
+        // Chat Completions endpoint; ai-api (GAI-6788) rejects them with a
+        // 400 directing callers to /v1/responses. Assert that rejection
+        // rather than expecting a completion. Metadata-driven, so a new
+        // image model is covered the minute it appears.
+        ...(isTextOutputModel(model) ? {} : { expectRejection: true }),
         routing: { kind: "model", model: model.id },
       })
     );
@@ -404,6 +456,11 @@ export async function buildV2Fixtures(
  * was added — callers pass `undefined` (or omit it) and the family
  * slice returns empty, so the digest fall-open behavior for legacy
  * snapshots is preserved.
+ *
+ * Image-only models/families are included here: they ARE probed (as
+ * `expectRejection` fixtures asserting the platform's 4xx), so their
+ * `v2/model/<id>` / `v2/family/<slug>` signatures belong in the
+ * allowed set just like every other probe.
  */
 export function currentProbeSignatures(
   modelIds: string[],

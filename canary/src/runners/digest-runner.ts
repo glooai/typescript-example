@@ -224,6 +224,7 @@ export function summarize(
     TIMEOUT: 0,
     TOOL_CALL_MISSING: 0,
     GUARDRAIL_BYPASS: 0,
+    UNEXPECTED_SUCCESS: 0,
   };
 
   let probesRun = 0;
