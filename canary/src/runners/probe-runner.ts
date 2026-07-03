@@ -56,6 +56,20 @@ export type ProbeRunnerDeps = {
    * previous behavior of any caller that doesn't opt in.
    */
   tier?: ProbeTier;
+  /**
+   * GCS blob the failure state is reconciled against. Defaults to the
+   * inference canary's `state/active-failures.json`. Ingestion mode
+   * passes its own blob — see INGESTION_ACTIVE_FAILURES_PATH for why
+   * the streams must not share one file.
+   */
+  activeFailuresPath?: string;
+  /**
+   * Set false for modes that don't participate in the adaptive
+   * Light/Full tiering (ingestion). Persisting tier state from such a
+   * run would tell the next inference tick a Full sweep just happened
+   * when it didn't. Defaults to true.
+   */
+  persistTierState?: boolean;
 };
 
 export async function runProbes(
@@ -107,18 +121,21 @@ export async function runProbes(
   // Persist tier state last. Safe to run as a best-effort step — if
   // the write fails we just fall through to "cold-start" on the next
   // run, which is a single extra Full sweep. Better than failing the
-  // whole run over a bookkeeping blob.
-  const tier: ProbeTier = deps.tier ?? "full";
-  try {
-    const previous = await deps.gcs.readJson<ProbeTierState>(
-      PROBE_TIER_STATE_PATH
-    );
-    await persistTierState(deps.gcs, { tier, now, previous });
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      `probe-tier-state: persist failed (non-fatal): ${(error as Error).message}`
-    );
+  // whole run over a bookkeeping blob. Skipped entirely for modes
+  // outside the Light/Full cascade (ingestion).
+  if (deps.persistTierState !== false) {
+    const tier: ProbeTier = deps.tier ?? "full";
+    try {
+      const previous = await deps.gcs.readJson<ProbeTierState>(
+        PROBE_TIER_STATE_PATH
+      );
+      await persistTierState(deps.gcs, { tier, now, previous });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `probe-tier-state: persist failed (non-fatal): ${(error as Error).message}`
+      );
+    }
   }
 
   return artifact;
@@ -207,8 +224,8 @@ export async function reconcileFailures(
   config: CanaryConfig,
   now: Date
 ): Promise<void> {
-  const existing =
-    (await deps.gcs.readJson<ActiveFailures>(ACTIVE_FAILURES_PATH)) ?? {};
+  const statePath = deps.activeFailuresPath ?? ACTIVE_FAILURES_PATH;
+  const existing = (await deps.gcs.readJson<ActiveFailures>(statePath)) ?? {};
   const next: ActiveFailures = { ...existing };
 
   const failuresBySignature = new Map<string, ProbeOutcome>();
@@ -332,7 +349,7 @@ export async function reconcileFailures(
     // next reconcile to re-evaluate.
   }
 
-  await deps.gcs.writeJson(ACTIVE_FAILURES_PATH, next);
+  await deps.gcs.writeJson(statePath, next);
 }
 
 /**

@@ -141,5 +141,16 @@ export function runArtifactPath(runId: string, startedAt: Date): string {
 
 export const ACTIVE_FAILURES_PATH = "state/active-failures.json";
 
+/**
+ * Ingestion-mode failure state lives in its own blob. The reconcile
+ * loop marks every open signature that is absent from the current run
+ * as "recovering" — if ingestion and inference runs shared one blob,
+ * each ingestion tick (which never carries the inference signatures)
+ * would start, and eventually confirm, false recoveries for open
+ * inference incidents.
+ */
+export const INGESTION_ACTIVE_FAILURES_PATH =
+  "state/active-failures-ingestion.json";
+
 /** Probe-tier-state blob — used by the adaptive tier selector. */
 export const PROBE_TIER_STATE_PATH = "state/probe-tier.json";
