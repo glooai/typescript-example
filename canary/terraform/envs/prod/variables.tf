@@ -70,6 +70,19 @@ variable "ingestion_publisher_id" {
   default     = ""
 }
 
+variable "heartbeats_enabled" {
+  description = <<-EOT
+    Mount the Better Stack heartbeat URLs (CANARY_HEARTBEAT_URL) into the
+    probe + ingestion jobs. Leave false until BOTH heartbeat secrets have a
+    version (`gcloud secrets versions add canary-heartbeat-url-probe /
+    canary-heartbeat-url-ingestion`) — Cloud Run refuses to start a job
+    that references a versionless secret. With the env absent the canary
+    code no-ops the heartbeat, so flipping this is purely additive.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "schedule_timezone" {
   description = "IANA timezone for the scheduler cron entries."
   type        = string

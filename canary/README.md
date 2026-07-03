@@ -102,6 +102,7 @@ until `ingestion_publisher_id` is provisioned in terraform).
 
 ## Alerting model
 
+- **Better Stack heartbeat** (when `CANARY_HEARTBEAT_URL` is set, one monitor per status-page component): every run POSTs the bare heartbeat URL on green and `<url>/fail` on any RED, flipping the bound status-page component automatically. A crashed or unscheduled canary sends nothing - Better Stack "missing heartbeat" doubles as the dead-canary watchdog (see `terraform/envs/prod/monitoring.tf`). YELLOW does not fail the heartbeat - entitlement/latency signals aren't outages.
 - **RED failure** (HTTP 5xx, unexpected 4xx, empty completion, schema drift, refusal regression, missing tool call `TOOL_CALL_MISSING`, guardrail bypass `GUARDRAIL_BYPASS`, non-abort network error): immediate top-level Slack post with full metadata.
 - **Recurring RED** (same signature failing on consecutive runs): **threaded reply** on the original post - no channel spam.
 - **Recovery**: threaded `:white_check_mark: Recovered` + reaction on the original post.

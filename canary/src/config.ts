@@ -36,6 +36,12 @@ export type CanaryConfig = {
   };
   // Only populated in ingestion mode.
   ingestion?: IngestionConfig;
+  /**
+   * Better Stack heartbeat URL for this job's component (set per Cloud
+   * Run Job: the probe job carries the Inference heartbeat, the
+   * ingestion job the Data Engine one). Absent → heartbeats disabled.
+   */
+  heartbeatUrl?: string;
 };
 
 function requireEnv(name: string): string {
@@ -84,6 +90,9 @@ export function loadConfig(now: Date = new Date()): CanaryConfig {
         `local-${now.toISOString().replace(/[:.]/g, "-")}`,
       startedAt: now.toISOString(),
     },
+    ...(process.env.CANARY_HEARTBEAT_URL
+      ? { heartbeatUrl: process.env.CANARY_HEARTBEAT_URL }
+      : {}),
     ...(mode === "ingestion"
       ? {
           ingestion: {

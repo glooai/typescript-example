@@ -869,3 +869,68 @@ it("runProbes scopes failure state to activeFailuresPath and skips tier persist 
   expect(gcs.writes.has("state/active-failures.json")).toBe(false);
   expect(gcs.writes.has("state/probe-tier.json")).toBe(false);
 });
+
+// --- Better Stack heartbeat reporting ---------------------------------------
+
+it("runProbes pings the heartbeat URL: bare on green, /fail on red, never on unset", async () => {
+  const heartbeatCalls: string[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    const s = String(url);
+    if (s.includes("/oauth2/token")) {
+      return new Response(JSON.stringify({ access_token: "abc" }), {
+        status: 200,
+      });
+    }
+    if (s.includes("heartbeat")) {
+      heartbeatCalls.push(s);
+      return new Response("", { status: 200 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  });
+
+  const outcomeFor = (severity: "RED" | "GREEN"): Probe => ({
+    signature: "v1/test",
+    label: "v1",
+    async run() {
+      return {
+        signature: "v1/test",
+        label: "v1",
+        endpoint: "https://example.com",
+        apiVersion: "v1",
+        httpStatus: severity === "RED" ? 500 : 200,
+        verdict: severity === "RED" ? "FAIL" : "PASS",
+        severity,
+        durationMs: 1,
+        details: {},
+        completedAt: 1700000000,
+      };
+    },
+  });
+
+  const withHeartbeat: CanaryConfig = {
+    ...CONFIG,
+    heartbeatUrl: "https://uptime.betterstack.com/api/v1/heartbeat/tok",
+  };
+
+  await runProbes(withHeartbeat, {
+    probes: [outcomeFor("GREEN")],
+    gcs: fakeGcs(),
+    slack: fakeSlack(),
+  });
+  await runProbes(withHeartbeat, {
+    probes: [outcomeFor("RED")],
+    gcs: fakeGcs(),
+    slack: fakeSlack(),
+  });
+  // No heartbeatUrl → no ping.
+  await runProbes(CONFIG, {
+    probes: [outcomeFor("GREEN")],
+    gcs: fakeGcs(),
+    slack: fakeSlack(),
+  });
+
+  expect(heartbeatCalls).toEqual([
+    "https://uptime.betterstack.com/api/v1/heartbeat/tok",
+    "https://uptime.betterstack.com/api/v1/heartbeat/tok/fail",
+  ]);
+});

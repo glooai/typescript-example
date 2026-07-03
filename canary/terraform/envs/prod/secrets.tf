@@ -11,6 +11,14 @@ locals {
     "gloo-ai-canary-client-secret" = "Dedicated Gloo AI canary OAuth client_secret."
     "alerts-slack-bot-token"       = "Slack xoxb- bot token for posting alerts."
     "alerts-slack-channel-id"      = "Target Slack channel ID (e.g. C0AU2FM2Q86)."
+    # Better Stack heartbeat URLs (token embedded in the URL — hence
+    # Secret Manager, not plain env). One monitor per status-page
+    # component. Jobs only mount these when heartbeats_enabled=true:
+    # Cloud Run refuses to start a job that references a secret with
+    # no version, so the mounts stay off until `gcloud secrets
+    # versions add` has populated both.
+    "canary-heartbeat-url-probe"     = "Better Stack heartbeat URL for the Inference component (canary-probe job)."
+    "canary-heartbeat-url-ingestion" = "Better Stack heartbeat URL for the Data Engine / Ingestion component (canary-ingestion job)."
   }
 }
 

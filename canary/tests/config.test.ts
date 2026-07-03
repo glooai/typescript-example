@@ -84,6 +84,18 @@ it("honors ingestion SLA/poll overrides and rejects non-numeric values", () => {
   expect(() => loadConfig()).toThrow(/CANARY_INGESTION_SLA_MS/);
 });
 
+it("attaches heartbeatUrl only when CANARY_HEARTBEAT_URL is set", () => {
+  process.env = { ...INGESTION_ENV, CANARY_MODE: "probe" };
+  delete process.env.CANARY_INGESTION_PUBLISHER_ID;
+  expect(loadConfig().heartbeatUrl).toBeUndefined();
+
+  process.env.CANARY_HEARTBEAT_URL =
+    "https://uptime.betterstack.com/api/v1/heartbeat/tok";
+  expect(loadConfig().heartbeatUrl).toBe(
+    "https://uptime.betterstack.com/api/v1/heartbeat/tok"
+  );
+});
+
 it("does not require or attach ingestion config in probe mode", () => {
   process.env = { ...INGESTION_ENV, CANARY_MODE: "probe" };
   delete process.env.CANARY_INGESTION_PUBLISHER_ID;

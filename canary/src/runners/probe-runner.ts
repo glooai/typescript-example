@@ -36,6 +36,7 @@ import {
   type RunArtifact,
 } from "../sinks/gcs.js";
 import type { SlackClient } from "../sinks/slack.js";
+import { createHeartbeatClient } from "../sinks/heartbeat.js";
 import { persistTierState, type ProbeTier } from "./tier-decision.js";
 
 export type ProbeRunnerDeps = {
@@ -137,6 +138,15 @@ export async function runProbes(
       );
     }
   }
+
+  // Better Stack heartbeat — the status-page component for this job.
+  // Any RED outcome reports "down"; YELLOW is a config/latency signal,
+  // not an outage, so it still reports "up". Sits at the very end on
+  // purpose: a crash anywhere above skips the ping entirely, which
+  // Better Stack surfaces as "missing heartbeat" — the dead-canary
+  // watchdog. No-op when config.heartbeatUrl is unset.
+  const anyRed = outcomes.some((o) => o.severity === "RED");
+  await createHeartbeatClient(config.heartbeatUrl).report(!anyRed);
 
   return artifact;
 }

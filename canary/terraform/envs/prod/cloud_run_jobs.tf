@@ -58,6 +58,21 @@ resource "google_cloud_run_v2_job" "canary_probe" {
           value = "probe"
         }
 
+        # Better Stack heartbeat for the Inference status-page component.
+        # Gated — see var.heartbeats_enabled for why.
+        dynamic "env" {
+          for_each = var.heartbeats_enabled ? [true] : []
+          content {
+            name = "CANARY_HEARTBEAT_URL"
+            value_source {
+              secret_key_ref {
+                secret  = "canary-heartbeat-url-probe"
+                version = "latest"
+              }
+            }
+          }
+        }
+
         dynamic "env" {
           for_each = local.shared_env
           content {
@@ -126,6 +141,21 @@ resource "google_cloud_run_v2_job" "canary_ingestion" {
           # config load — see variables.tf.
           name  = "CANARY_INGESTION_PUBLISHER_ID"
           value = var.ingestion_publisher_id
+        }
+
+        # Better Stack heartbeat for the Data Engine / Ingestion
+        # status-page component. Gated — see var.heartbeats_enabled.
+        dynamic "env" {
+          for_each = var.heartbeats_enabled ? [true] : []
+          content {
+            name = "CANARY_HEARTBEAT_URL"
+            value_source {
+              secret_key_ref {
+                secret  = "canary-heartbeat-url-ingestion"
+                version = "latest"
+              }
+            }
+          }
         }
 
         dynamic "env" {

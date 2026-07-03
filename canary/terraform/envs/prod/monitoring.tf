@@ -15,21 +15,24 @@
  *   would produce false positives on any day that falls in a new weekly window
  *   before the probe has had a chance to run.
  *
- * RECOMMENDED FUTURE APPROACH (pick one):
- *   A. Write a small Cloud Function (or a second Cloud Run Job) that runs on
- *      Monday evenings (~18:00 CT). It reads the most recent GCS artifact
- *      timestamp under gs://glooai-canary-results/runs/ and publishes a custom
- *      metric (monitoring.googleapis.com/custom/canary/probe_age_hours).
- *      A standard condition_threshold on that metric (threshold > 168h) works
- *      within all API limits and produces a clean, rolling alert.
- *   B. Use an external uptime-monitoring tool (e.g., Better Uptime, Grafana
- *      Cloud, or PagerDuty Synthetic Checks) pointed at the GCS bucket's most
- *      recent object or a lightweight /healthz endpoint that reads GCS.
+ * RESOLUTION (GAI-6872): approach B, via Better Stack heartbeats.
+ *   Every probe/ingestion run POSTs its Better Stack heartbeat URL at the
+ *   very end of runProbes (src/sinks/heartbeat.ts): bare URL on green,
+ *   `/fail` on any RED. A canary that crashes or stops being scheduled
+ *   sends nothing, and Better Stack raises "missing heartbeat" after the
+ *   monitor's grace period — a rolling absence alert with no GCP duration
+ *   limit. Configure the grace period per monitor in Better Stack:
+ *   probe ≈ schedule interval + 1h; ingestion ≈ 6h + 30m.
  *
- * WHEN IMPLEMENTED:
- *   - Add roles/monitoring.alertPolicyEditor to service_account.tf for the
- *     deployer SA (github-actions-canary-deploy@glooai.iam.gserviceaccount.com)
- *   - Wire var.alert_notification_channels to the new policy
+ *   Enablement is gated on var.heartbeats_enabled (see variables.tf) so
+ *   the secret mounts only appear once the heartbeat URLs exist in
+ *   Secret Manager.
+ *
+ * HISTORICAL ALTERNATIVE (kept for reference):
+ *   A. A small Cloud Run Job publishing a custom freshness metric
+ *      (canary/probe_age_hours) from the newest GCS artifact, alerted via
+ *      condition_threshold — works within the 23h30m absence-duration API
+ *      limit, but needs an extra job + alertPolicyEditor on the deployer SA.
  *
  * See: canary/.context/adrs/2026-05-11-digest-race-condition-rca.md § "Forward-looking guards" item 3
  */
