@@ -53,6 +53,15 @@ Fixture-driven in `src/fixtures/index.ts` — add new cases there, no code chang
 
 Each Full sweep runs the routing-mode probes, every direct-model probe, and the three capability probes below, so the total tracks the size of the live registry rather than a fixed number.
 
+**Data Engine ingestion E2E** (`CANARY_MODE=ingestion`, own scheduler) - one probe per firing that exercises the ingestion pipeline the way an API customer does (GAI-6868):
+
+1. `POST /ingestion/v2/files` - multipart upload of a tiny sentinel `.txt` to the dedicated canary publisher (`CANARY_INGESTION_PUBLISHER_ID`). Transient 5xx retried (2x) before declaring failure.
+2. `GET /engine/v2/items/{id}` - poll the processing status (`QUEUED -> CHUNKING -> EMBEDDING -> COMPLETED`) every 15s. `FAILED` -> RED; no terminal status within the SLA budget (default 10 min, `CANARY_INGESTION_SLA_MS`) -> **`SLA_EXCEEDED` RED** - the "customers' ingestion is silently stuck" signal.
+3. `GET /engine/v1/files/{id}/snippets` - assert the run-unique sentinel chunk is actually retrievable from the index, not just marked COMPLETED.
+4. `DELETE /engine/v2/items` - hard-delete the canary item. A delete failure on an otherwise-green run is **`CLEANUP_FAILED` YELLOW** (item leaked, go clean up - not an outage).
+
+Ingestion failure state is reconciled against its own GCS blob (`state/active-failures-ingestion.json`) and skips the probe-tier bookkeeping, so ingestion and inference incidents never interfere with each other's alert/recovery lifecycle. A submit 403 maps to `NOT_ENTITLED` YELLOW (missing `ingestion_access` entitlement / publisher-org mismatch - provisioning, not an outage). Runs cost no completion tokens, hence the denser cadence (every 6h) than the weekly inference sweeps.
+
 Every routing-mode and direct-model probe uses a benign technical-writing prompt and asserts the response:
 
 - Returns 2xx
@@ -85,16 +94,19 @@ per Full sweep with `max_tokens: 1024` and a 60s timeout.
          │                                └─ GCS state ──────> active-failures.json + probe-tier.json
 ```
 
-One Docker image, two entry points selected by `CANARY_MODE`
-(`probe` | `digest`).
+One Docker image, three entry points selected by `CANARY_MODE`
+(`probe` | `digest` | `ingestion`). The `canary-ingestion` job runs on
+its own 6-hourly scheduler and keeps its failure state in
+`state/active-failures-ingestion.json` (the scheduler ships paused
+until `ingestion_publisher_id` is provisioned in terraform).
 
 ## Alerting model
 
 - **RED failure** (HTTP 5xx, unexpected 4xx, empty completion, schema drift, refusal regression, missing tool call `TOOL_CALL_MISSING`, guardrail bypass `GUARDRAIL_BYPASS`, non-abort network error): immediate top-level Slack post with full metadata.
-- **Recurring RED** (same signature failing on consecutive runs): **threaded reply** on the original post — no channel spam.
+- **Recurring RED** (same signature failing on consecutive runs): **threaded reply** on the original post - no channel spam.
 - **Recovery**: threaded `:white_check_mark: Recovered` + reaction on the original post.
 - **Weekly digest**: top-level post Monday at 06:15 CT summarizing the preceding 7 days (168h): probes run, severity distribution, per-probe latency quantiles, archive state.
-- **YELLOW signals** (latency anomalies, routing shifts, `NOT_ENTITLED` on HTTP 403, `TIMEOUT` on probe-side `AbortSignal.timeout()` firing): **threaded reply** on the digest post — no top-level page.
+- **YELLOW signals** (latency anomalies, routing shifts, `NOT_ENTITLED` on HTTP 403, `TIMEOUT` on probe-side `AbortSignal.timeout()` firing): **threaded reply** on the digest post - no top-level page.
   - `NOT_ENTITLED` fires when a model is listed in `/platform/v2/models` but our canary OAuth client isn't granted access. This is a stable configuration signal, not a platform outage.
   - `TIMEOUT` fires when the probe's own timeout elapses before the upstream responds. A single occurrence is a latency tail; a persistent pattern on a specific model is the signal to raise the per-fixture timeout or escalate upstream.
 
