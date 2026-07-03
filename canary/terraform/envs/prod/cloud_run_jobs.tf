@@ -1,6 +1,6 @@
 /**
- * Two Cloud Run Jobs sharing one Docker image. CANARY_MODE picks the
- * entry point at runtime (probe vs digest).
+ * Three Cloud Run Jobs sharing one Docker image. CANARY_MODE picks the
+ * entry point at runtime (probe vs digest vs ingestion).
  */
 
 locals {
@@ -56,6 +56,76 @@ resource "google_cloud_run_v2_job" "canary_probe" {
         env {
           name  = "CANARY_MODE"
           value = "probe"
+        }
+
+        dynamic "env" {
+          for_each = local.shared_env
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
+        }
+
+        dynamic "env" {
+          for_each = local.shared_secrets
+          content {
+            name = env.value.env_name
+            value_source {
+              secret_key_ref {
+                secret  = env.value.secret_key
+                version = "latest"
+              }
+            }
+          }
+        }
+
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = "512Mi"
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [
+    google_secret_manager_secret_iam_member.canary_runner_accessor,
+    google_storage_bucket_iam_member.canary_runner_object_admin,
+  ]
+}
+
+resource "google_cloud_run_v2_job" "canary_ingestion" {
+  name                = "canary-ingestion"
+  location            = var.region
+  project             = var.project_id
+  deletion_protection = false
+
+  template {
+    template {
+      service_account = google_service_account.canary_runner.email
+      # The probe polls the pipeline for up to CANARY_INGESTION_SLA_MS
+      # (default 10 min) before declaring SLA_EXCEEDED, plus submit
+      # retries + verification + cleanup — give the job comfortable
+      # headroom over the SLA budget.
+      timeout     = "900s"
+      max_retries = 1
+
+      containers {
+        image = local.image_uri
+
+        env {
+          name  = "CANARY_MODE"
+          value = "ingestion"
+        }
+
+        env {
+          # Dedicated canary publisher (owned by the canary client's
+          # org, which must hold the `ingestion_access` entitlement).
+          # Until this is provisioned and set, the job fails fast at
+          # config load — see variables.tf.
+          name  = "CANARY_INGESTION_PUBLISHER_ID"
+          value = var.ingestion_publisher_id
         }
 
         dynamic "env" {
