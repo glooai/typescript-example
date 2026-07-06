@@ -374,6 +374,30 @@ it("currentProbeSignatures produces a known-stable v2/model/<id> slug", () => {
   expect(currentProbeSignatures(["gloo-foo"])).toContain("v2/model/gloo-foo");
 });
 
+it("buildV2Fixtures builds probes for surviving models when loadModels drops a bad entry", async () => {
+  // fetchV2Models now drops malformed registry rows and returns only the
+  // well-formed survivors (TangoGroup/gloo#47). buildV2Fixtures must build
+  // direct-model and family fixtures for whatever survivors it is handed,
+  // rather than zeroing out the whole sweep on one bad row. We inject a
+  // two-model survivor set (as fetchV2Models would return post-drop).
+  const survivors: V2ModelSummary[] = [
+    { id: "gloo-openai-gpt-5.2", family: "OpenAI", name: "GPT-5.2" },
+    {
+      id: "gloo-anthropic-claude-haiku-4.5",
+      family: "Anthropic",
+      name: "Claude Haiku 4.5",
+    },
+  ];
+  const fixtures = await buildV2Fixtures({
+    loadModels: async () => survivors,
+  });
+  const signatures = fixtures.map((f) => f.signature);
+  expect(signatures).toContain("v2/model/gloo-openai-gpt-5.2");
+  expect(signatures).toContain("v2/model/gloo-anthropic-claude-haiku-4.5");
+  expect(signatures).toContain("v2/family/openai");
+  expect(signatures).toContain("v2/family/anthropic");
+});
+
 it("buildV2Fixtures surfaces loadModels failures so the probe run fails loudly", async () => {
   await expect(
     buildV2Fixtures({

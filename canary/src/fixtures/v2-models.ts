@@ -81,9 +81,35 @@ const ModelEntrySchema = z.object({
   output_modalities: z.array(z.string()).optional(),
 });
 
+/**
+ * Envelope schema. Validates only the top-level shape, deliberately NOT
+ * each element. Per-entry validation happens in `fetchV2Models` so one
+ * malformed registry row can be dropped without discarding every other
+ * probe (see `TangoGroup/gloo#47`). This still throws loudly when `data`
+ * is missing, is not an array, or is empty: the total-outage and
+ * empty-registry cases a canary must fail on.
+ */
 const ModelsResponseSchema = z.object({
-  data: z.array(ModelEntrySchema).min(1),
+  data: z.array(z.unknown()).min(1),
 });
+
+/**
+ * Compact `path: message` summary for a zod error, joined with `; `.
+ * Reused across the envelope-failure and per-entry-failure paths.
+ */
+function summarizeIssues(error: z.ZodError): string {
+  return error.issues
+    .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+    .join("; ");
+}
+
+const EntryIdSchema = z.object({ id: z.string().min(1) });
+
+/** Extracts a usable id from a raw registry row without asserting its shape. */
+function extractEntryId(rawEntry: unknown): string {
+  const parsed = EntryIdSchema.safeParse(rawEntry);
+  return parsed.success ? parsed.data.id : "(no id)";
+}
 
 export type FetchV2ModelsOptions = {
   modelsUrl?: string;
@@ -129,18 +155,45 @@ export async function fetchV2Models(
 
   const parsed = ModelsResponseSchema.safeParse(raw);
   if (!parsed.success) {
-    const issues = parsed.error.issues
-      .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
-      .join("; ");
     throw new Error(
-      `GET ${url} returned a body that does not match the expected shape: ${issues}`
+      `GET ${url} returned a body that does not match the expected shape: ${summarizeIssues(parsed.error)}`
     );
   }
 
-  return parsed.data.data.map((entry) => ({
-    id: entry.id,
-    family: entry.family,
-    name: entry.name,
-    outputModalities: entry.output_modalities ?? ["text"],
-  }));
+  const entries = parsed.data.data;
+  const survivors: V2ModelSummary[] = [];
+  const dropped: string[] = [];
+  for (let index = 0; index < entries.length; index++) {
+    const entryParsed = ModelEntrySchema.safeParse(entries[index]);
+    if (entryParsed.success) {
+      const entry = entryParsed.data;
+      survivors.push({
+        id: entry.id,
+        family: entry.family,
+        name: entry.name,
+        outputModalities: entry.output_modalities ?? ["text"],
+      });
+      continue;
+    }
+    // Surface the entry id when the raw row carried a usable one, so the
+    // warning names the offending model without dumping the full body.
+    const id = extractEntryId(entries[index]);
+    dropped.push(
+      `[index ${index}, id ${id}] ${summarizeIssues(entryParsed.error)}`
+    );
+  }
+
+  if (survivors.length === 0) {
+    throw new Error(
+      `GET ${url} returned ${entries.length} entries but none matched the expected shape: ${dropped.join(" | ")}`
+    );
+  }
+
+  if (dropped.length > 0) {
+    console.warn(
+      `v2-models: dropped ${dropped.length} of ${entries.length} registry entries that failed schema validation (non-fatal): ${dropped.join(" | ")}`
+    );
+  }
+
+  return survivors;
 }
