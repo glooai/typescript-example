@@ -103,6 +103,50 @@ it("extractFamilies returns every family, image-only included", () => {
   ]);
 });
 
+it("extractFamilies dedupes casing/whitespace variants into one canonical entry", () => {
+  // The live registry returning "OpenAI" and " OpenAI " must not yield two
+  // families that both slug to "openai" and emit a duplicate probe signature.
+  const fams = extractFamilies([
+    { id: "gloo-openai-a", family: "OpenAI", name: "A" },
+    { id: "gloo-openai-b", family: " OpenAI ", name: "B" },
+  ]);
+  expect(fams).toEqual(["OpenAI"]);
+});
+
+it("buildV2FamilyFixtures emits one fixture/signature per family variant set", () => {
+  // End-to-end regression for issue #51: two variants of one family flowing
+  // through extractFamilies then buildV2FamilyFixtures must produce exactly
+  // one fixture, not two probes colliding on "v2/family/openai".
+  const models: V2ModelSummary[] = [
+    { id: "gloo-openai-a", family: "OpenAI", name: "A" },
+    { id: "gloo-openai-b", family: " OpenAI ", name: "B" },
+  ];
+  const fixtures = buildV2FamilyFixtures(extractFamilies(models));
+  expect(fixtures).toHaveLength(1);
+  expect(fixtures.map((f) => f.signature)).toEqual(["v2/family/openai"]);
+});
+
+it("imageOnlyFamilies groups casing/whitespace variants into one bucket", () => {
+  // A family split across "xAI" and " xAI " must group as a single bucket
+  // keyed on the canonical trimmed value that extractFamilies emits, so
+  // buildV2FamilyFixtures' imageOnly.has() lookup lines up.
+  const families = imageOnlyFamilies([
+    {
+      id: "gloo-xai-grok-imagine",
+      family: "xAI",
+      name: "Grok Imagine",
+      outputModalities: ["image"],
+    },
+    {
+      id: "gloo-xai-grok-imagine-2",
+      family: " xAI ",
+      name: "Grok Imagine 2",
+      outputModalities: ["image"],
+    },
+  ]);
+  expect([...families]).toEqual(["xAI"]);
+});
+
 it("imageOnlyFamilies flags all-image families but not mixed ones", () => {
   const families = imageOnlyFamilies([
     ...MODELS, // Anthropic / OpenAI / Open Source — all text
