@@ -3,7 +3,15 @@
  * variables populated by Cloud Run from Secret Manager + job env.
  */
 
-export type CanaryMode = "probe" | "digest";
+export type CanaryMode = "probe" | "digest" | "ingestion";
+
+export type IngestionConfig = {
+  /** Dedicated canary publisher (must belong to the canary client's org). */
+  publisherId: string;
+  /** End-to-end processing budget before SLA_EXCEEDED (RED). */
+  slaMs: number;
+  pollIntervalMs: number;
+};
 
 export type CanaryConfig = {
   mode: CanaryMode;
@@ -26,6 +34,14 @@ export type CanaryConfig = {
     runId: string;
     startedAt: string;
   };
+  // Only populated in ingestion mode.
+  ingestion?: IngestionConfig;
+  /**
+   * Better Stack heartbeat URL for this job's component (set per Cloud
+   * Run Job: the probe job carries the Inference heartbeat, the
+   * ingestion job the Data Engine one). Absent → heartbeats disabled.
+   */
+  heartbeatUrl?: string;
 };
 
 function requireEnv(name: string): string {
@@ -37,15 +53,26 @@ function requireEnv(name: string): string {
 }
 
 export function parseMode(raw: string | undefined): CanaryMode {
-  if (raw === "probe" || raw === "digest") return raw;
+  if (raw === "probe" || raw === "digest" || raw === "ingestion") return raw;
   throw new Error(
-    `CANARY_MODE must be "probe" or "digest" (received: ${raw ?? "unset"})`
+    `CANARY_MODE must be "probe", "digest", or "ingestion" (received: ${raw ?? "unset"})`
   );
 }
 
+function optionalPositiveInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.length === 0) return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} must be a non-negative number (received: ${raw})`);
+  }
+  return value;
+}
+
 export function loadConfig(now: Date = new Date()): CanaryConfig {
+  const mode = parseMode(process.env.CANARY_MODE);
   return {
-    mode: parseMode(process.env.CANARY_MODE),
+    mode,
     gloo: {
       clientId: requireEnv("GLOO_AI_CLIENT_ID"),
       clientSecret: requireEnv("GLOO_AI_CLIENT_SECRET"),
@@ -63,5 +90,20 @@ export function loadConfig(now: Date = new Date()): CanaryConfig {
         `local-${now.toISOString().replace(/[:.]/g, "-")}`,
       startedAt: now.toISOString(),
     },
+    ...(process.env.CANARY_HEARTBEAT_URL
+      ? { heartbeatUrl: process.env.CANARY_HEARTBEAT_URL }
+      : {}),
+    ...(mode === "ingestion"
+      ? {
+          ingestion: {
+            publisherId: requireEnv("CANARY_INGESTION_PUBLISHER_ID"),
+            slaMs: optionalPositiveInt("CANARY_INGESTION_SLA_MS", 600_000),
+            pollIntervalMs: optionalPositiveInt(
+              "CANARY_INGESTION_POLL_INTERVAL_MS",
+              15_000
+            ),
+          },
+        }
+      : {}),
   };
 }

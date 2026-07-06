@@ -48,9 +48,27 @@ export type Verdict =
    * the platform returned a 2xx for a model that has no text output and
    * should have been refused on the Chat Completions surface. Indicates
    * the ai-api GAI-6788 guard regressed (the request is being routed and
-   * the image model processed into an empty completion) — always RED.
+   * the image model processed into an empty completion) - always RED.
    */
-  | "UNEXPECTED_SUCCESS";
+  | "UNEXPECTED_SUCCESS"
+  /**
+   * Ingestion probe: the submitted item did not reach a terminal
+   * status within the fixture's SLA budget - the pipeline is stalled
+   * (stuck in QUEUED/CHUNKING/...). This is the primary "customers'
+   * ingestion is silently hanging" signal - always RED. Distinct from
+   * TIMEOUT (a single HTTP request outliving its budget, YELLOW):
+   * SLA_EXCEEDED means the platform accepted the work and then never
+   * finished it.
+   */
+  | "SLA_EXCEEDED"
+  /**
+   * Ingestion probe: the pipeline worked end to end (submit ->
+   * COMPLETED -> retrievable) but the best-effort hard-delete of the
+   * canary item failed, leaking a test document into the canary
+   * publisher. Not an outage - YELLOW, so it lands in the digest
+   * thread as a "go clean this up" signal.
+   */
+  | "CLEANUP_FAILED";
 
 export type ProbeContext = {
   accessToken: string;

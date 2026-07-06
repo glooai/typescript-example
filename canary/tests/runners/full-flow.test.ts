@@ -793,3 +793,144 @@ it("runDigest renders a subdued baseline note on the first-snapshot case", async
   // change, it's the first measurement.
   expect(summary.severityCounts.YELLOW).toBe(0);
 });
+
+// --- Ingestion-mode runner isolation ----------------------------------------
+//
+// The ingestion canary runs on its own schedule, so its failure state must
+// be reconciled against its OWN GCS blob and it must not touch the
+// probe-tier bookkeeping. Without the path split, an ingestion run that
+// doesn't include the inference signatures would start (and eventually
+// confirm) false recoveries for open inference incidents.
+
+it("runProbes scopes failure state to activeFailuresPath and skips tier persist when asked", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    if (String(url).includes("/oauth2/token")) {
+      return new Response(JSON.stringify({ access_token: "abc" }), {
+        status: 200,
+      });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  });
+
+  const probe: Probe = {
+    signature: "ingestion/v2/e2e-text-file",
+    label: "Ingestion E2E",
+    async run() {
+      return {
+        signature: "ingestion/v2/e2e-text-file",
+        label: "Ingestion E2E",
+        endpoint: "https://example.com",
+        apiVersion: "items",
+        httpStatus: 502,
+        verdict: "FAIL",
+        severity: "RED",
+        durationMs: 100,
+        details: {},
+        completedAt: 1700000000,
+      };
+    },
+  };
+
+  // An open INFERENCE incident lives in the default state blob. The
+  // ingestion run must leave it untouched (no recovery bookkeeping).
+  const inferenceState = {
+    "v2/model/haiku-4.5": {
+      firstSeenAt: "2026-04-20T17:00:00Z",
+      lastSeenAt: "2026-04-20T17:45:00Z",
+      slackTs: "123.456",
+      attempts: 3,
+      lastVerdict: "FAIL",
+    },
+  };
+  const gcs = fakeGcs({
+    files: { "state/active-failures.json": inferenceState },
+  });
+  const slack = fakeSlack();
+
+  await runProbes(
+    CONFIG,
+    {
+      probes: [probe],
+      gcs,
+      slack,
+      activeFailuresPath: "state/active-failures-ingestion.json",
+      persistTierState: false,
+    },
+    new Date("2026-04-20T18:00:00Z")
+  );
+
+  // Ingestion failure recorded in its own blob…
+  const ingestionState = gcs.writes.get(
+    "state/active-failures-ingestion.json"
+  ) as Record<string, { attempts: number }>;
+  expect(ingestionState["ingestion/v2/e2e-text-file"].attempts).toBe(1);
+
+  // …the inference blob untouched, and no tier bookkeeping written.
+  expect(gcs.writes.has("state/active-failures.json")).toBe(false);
+  expect(gcs.writes.has("state/probe-tier.json")).toBe(false);
+});
+
+// --- Better Stack heartbeat reporting ---------------------------------------
+
+it("runProbes pings the heartbeat URL: bare on green, /fail on red, never on unset", async () => {
+  const heartbeatCalls: string[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    const s = String(url);
+    if (s.includes("/oauth2/token")) {
+      return new Response(JSON.stringify({ access_token: "abc" }), {
+        status: 200,
+      });
+    }
+    if (s.includes("heartbeat")) {
+      heartbeatCalls.push(s);
+      return new Response("", { status: 200 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  });
+
+  const outcomeFor = (severity: "RED" | "GREEN"): Probe => ({
+    signature: "v1/test",
+    label: "v1",
+    async run() {
+      return {
+        signature: "v1/test",
+        label: "v1",
+        endpoint: "https://example.com",
+        apiVersion: "v1",
+        httpStatus: severity === "RED" ? 500 : 200,
+        verdict: severity === "RED" ? "FAIL" : "PASS",
+        severity,
+        durationMs: 1,
+        details: {},
+        completedAt: 1700000000,
+      };
+    },
+  });
+
+  const withHeartbeat: CanaryConfig = {
+    ...CONFIG,
+    heartbeatUrl: "https://uptime.betterstack.com/api/v1/heartbeat/tok",
+  };
+
+  await runProbes(withHeartbeat, {
+    probes: [outcomeFor("GREEN")],
+    gcs: fakeGcs(),
+    slack: fakeSlack(),
+  });
+  await runProbes(withHeartbeat, {
+    probes: [outcomeFor("RED")],
+    gcs: fakeGcs(),
+    slack: fakeSlack(),
+  });
+  // No heartbeatUrl → no ping.
+  await runProbes(CONFIG, {
+    probes: [outcomeFor("GREEN")],
+    gcs: fakeGcs(),
+    slack: fakeSlack(),
+  });
+
+  expect(heartbeatCalls).toEqual([
+    "https://uptime.betterstack.com/api/v1/heartbeat/tok",
+    "https://uptime.betterstack.com/api/v1/heartbeat/tok/fail",
+  ]);
+});

@@ -1,6 +1,11 @@
 /**
- * Cloud Run Job entry point. Selects between probe and digest modes based on
- * the CANARY_MODE env var populated by Terraform.
+ * Cloud Run Job entry point. Selects between probe, digest, and ingestion
+ * modes based on the CANARY_MODE env var populated by Terraform.
+ *
+ * Ingestion mode runs a single end-to-end Data Engine pipeline probe
+ * (submit → poll status → verify retrievable → delete) on its own
+ * schedule, with failure state isolated from the inference canary's —
+ * see `probes/ingestion.ts`.
  *
  * Probe-mode execution is tiered:
  *   - LIGHT: single `auto_routing` pulse probe. Cheapest possible check
@@ -21,6 +26,8 @@ import { createGcsClient } from "./sinks/gcs.js";
 import { createSlackClient } from "./sinks/slack.js";
 import { buildV1Probe } from "./probes/v1-messages.js";
 import { buildV2Probe } from "./probes/v2-completions.js";
+import { buildIngestionProbe } from "./probes/ingestion.js";
+import { INGESTION_ACTIVE_FAILURES_PATH } from "./sinks/gcs.js";
 import {
   V1_FIXTURES,
   V2_LIGHT_PULSE_FIXTURE,
@@ -124,6 +131,46 @@ export async function main(): Promise<void> {
               isFirstSnapshot: artifact.registryDelta.isFirstSnapshot,
             }
           : null,
+      })
+    );
+    return;
+  }
+
+  if (config.mode === "ingestion") {
+    if (!config.ingestion) {
+      throw new Error("ingestion config missing in ingestion mode");
+    }
+    // One end-to-end journey per firing. Failure state and tier
+    // bookkeeping are isolated from the inference canary — an
+    // ingestion run knows nothing about model signatures and must not
+    // touch their incident lifecycle.
+    const probes = [
+      buildIngestionProbe({
+        signature: "ingestion/v2/e2e-text-file",
+        label: "Ingestion E2E · text file (submit → status → snippets)",
+        publisherId: config.ingestion.publisherId,
+        slaMs: config.ingestion.slaMs,
+        pollIntervalMs: config.ingestion.pollIntervalMs,
+      }),
+    ];
+    const artifact = await runProbes(config, {
+      probes,
+      gcs,
+      slack,
+      activeFailuresPath: INGESTION_ACTIVE_FAILURES_PATH,
+      persistTierState: false,
+    });
+    const outcome = artifact.outcomes[0];
+    // eslint-disable-next-line no-console
+    console.log(
+      JSON.stringify({
+        level: "info",
+        msg: "ingestion run complete",
+        runId: artifact.runId,
+        verdict: outcome?.verdict,
+        severity: outcome?.severity,
+        durationMs: outcome?.durationMs,
+        itemId: outcome?.details.itemId ?? null,
       })
     );
     return;

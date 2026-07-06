@@ -48,6 +48,41 @@ variable "digest_schedule_cron" {
   default = "15 6 * * 1"
 }
 
+variable "ingestion_schedule_cron" {
+  description = "Ingestion-canary cron expression (America/Chicago timezone)."
+  type        = string
+  # Every 6 hours — the Platform Health project promises ingestion status
+  # "multiple times per day". Unlike the inference probes (dialed to weekly
+  # for AI token spend), an ingestion run costs no completion tokens — just
+  # one tiny file through the pipeline — so a 4x/day cadence is cheap.
+  default = "30 */6 * * *"
+}
+
+variable "ingestion_publisher_id" {
+  description = <<-EOT
+    Dedicated canary publisher for the ingestion E2E probe. Must belong to
+    the canary OAuth client's organization, and that org must hold the
+    `ingestion_access` entitlement. Leave empty until provisioned — the
+    ingestion job then exits non-zero at config load (a loud failure in
+    Cloud Run logs) rather than probing the wrong publisher.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "heartbeats_enabled" {
+  description = <<-EOT
+    Mount the Better Stack heartbeat URLs (CANARY_HEARTBEAT_URL) into the
+    probe + ingestion jobs. Leave false until BOTH heartbeat secrets have a
+    version (`gcloud secrets versions add canary-heartbeat-url-probe /
+    canary-heartbeat-url-ingestion`) — Cloud Run refuses to start a job
+    that references a versionless secret. With the env absent the canary
+    code no-ops the heartbeat, so flipping this is purely additive.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "schedule_timezone" {
   description = "IANA timezone for the scheduler cron entries."
   type        = string
