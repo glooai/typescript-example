@@ -182,13 +182,19 @@ export function familySlug(family: string): string {
  * select), see `imageOnlyFamilies` + `buildV2FamilyFixtures`.
  */
 export function extractFamilies(models: V2ModelSummary[]): string[] {
-  const set = new Set<string>();
+  // Dedupe on the normalized slug (trim + lowercase) so casing and
+  // whitespace variants of the same family ("OpenAI" vs " OpenAI ") collapse
+  // to a single entry instead of emitting two fixtures that both compute the
+  // signature "v2/family/openai". Keep the first-seen trimmed value as the
+  // canonical display casing fed to the API.
+  const bySlug = new Map<string, string>();
   for (const m of models) {
     if (m.family && m.family.trim().length > 0) {
-      set.add(m.family);
+      const slug = familySlug(m.family);
+      if (!bySlug.has(slug)) bySlug.set(slug, m.family.trim());
     }
   }
-  return Array.from(set).sort((a, b) => a.localeCompare(b));
+  return Array.from(bySlug.values()).sort((a, b) => a.localeCompare(b));
 }
 
 /**
@@ -203,16 +209,27 @@ export function extractFamilies(models: V2ModelSummary[]): string[] {
  * expecting success.
  */
 export function imageOnlyFamilies(models: V2ModelSummary[]): Set<string> {
-  const byFamily = new Map<string, V2ModelSummary[]>();
+  // Group on the normalized slug (trim + lowercase) so casing and whitespace
+  // variants of one family land in the same bucket instead of two. The set
+  // stores the canonical trimmed display value that `extractFamilies`
+  // emits, so `imageOnly.has(family)` lines up in `buildV2FamilyFixtures`.
+  const byFamily = new Map<
+    string,
+    { display: string; members: V2ModelSummary[] }
+  >();
   for (const m of models) {
     if (!m.family || !m.family.trim()) continue;
-    const arr = byFamily.get(m.family) ?? [];
-    arr.push(m);
-    byFamily.set(m.family, arr);
+    const slug = familySlug(m.family);
+    const bucket = byFamily.get(slug) ?? {
+      display: m.family.trim(),
+      members: [],
+    };
+    bucket.members.push(m);
+    byFamily.set(slug, bucket);
   }
   const out = new Set<string>();
-  for (const [family, members] of byFamily) {
-    if (members.every((m) => !isTextOutputModel(m))) out.add(family);
+  for (const { display, members } of byFamily.values()) {
+    if (members.every((m) => !isTextOutputModel(m))) out.add(display);
   }
   return out;
 }
