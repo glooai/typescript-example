@@ -36,7 +36,10 @@ import { buildV2Fixtures } from "./fixtures/index.js";
 // dotenv does not override env vars already present, so creds exported at
 // call time (the recommended path — source them, never commit them) win.
 loadEnv({ path: ".env.local" });
-import { buildV2Probe, type V2CompletionsFixture } from "./probes/v2-completions.js";
+import {
+  buildV2Probe,
+  type V2CompletionsFixture,
+} from "./probes/v2-completions.js";
 import type { ProbeContext, ProbeOutcome } from "./probes/types.js";
 
 export type ReproOptions = {
@@ -137,7 +140,9 @@ function summarize(outcome: ProbeOutcome): string {
     lines.push(`  response:  ${outcome.responsePreview}`);
   }
   if (outcome.details && Object.keys(outcome.details).length > 0) {
-    lines.push(`  details:   ${JSON.stringify(outcome.details).slice(0, 1000)}`);
+    lines.push(
+      `  details:   ${JSON.stringify(outcome.details).slice(0, 1000)}`
+    );
   }
   return lines.join("\n");
 }
