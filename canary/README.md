@@ -38,8 +38,10 @@ Fixture-driven in `src/fixtures/index.ts` — add new cases there, no code chang
 **V2 Completions** (`/ai/v2/chat/completions`):
 
 - **Light pulse (1)**: `v2/light/auto_routing`, single-word prompt, `max_tokens: 4`. Runs on every "light" tick.
-- **Routing-mode (5)** — `auto_routing: true` + `model_family` in `{Anthropic, OpenAI, Google, Open Source}`. `max_tokens: 48`.
+- **Routing-mode (5)** — `auto_routing: true` + `model_family` per family in the registry (e.g. `{Anthropic, OpenAI, Google, Open Source}`). `max_tokens: 48`.
 - **Direct-model (~15)** — one per live alias from `/platform/v2/models`. Hydrated at run time so the probe list can never drift from the authoritative registry. `max_tokens: 48` each.
+
+  **Image-only models are probed as `expectRejection` fixtures, not excluded.** A model whose `output_modalities` has no `"text"` (FLUX, Seedream, Grok Imagine), and a family whose every member is image-only, can't return a text completion on this Chat Completions endpoint — ai-api rejects them with a 4xx (GAI-6788) directing callers to `/v1/responses`. The probe asserts that contract: a **4xx is PASS** (correctly rejected, GREEN), a **2xx is `UNEXPECTED_SUCCESS`** (RED — the image-only model was processed into an empty completion, the GAI-6788 bug). This is metadata-driven off the registry's `output_modalities`, so a new image model is covered the minute it appears — no list to maintain. _(Depends on ai-api GAI-6788 being deployed to the probed environment; before that, image-only **model** probes stay RED — the platform returns a slow empty 200, not a 4xx — while image-only **family** probes already 4xx as "unknown family." This canary change should land after ai-api #1760 deploys.)_
 
 Full sweep total: **~21 probe executions**. Inference spend scales with the tier ratio — a fully-healthy day runs mostly Light ticks and a handful of Full sweeps, dropping request volume by roughly an order of magnitude vs. a firing-every-tick-at-full-coverage policy.
 

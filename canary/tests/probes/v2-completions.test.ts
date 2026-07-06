@@ -79,6 +79,54 @@ const MULTI_TURN_FIXTURE: V2CompletionsFixture = {
   routing: { kind: "auto_routing" },
 };
 
+const IMAGE_ONLY_FIXTURE: V2CompletionsFixture = {
+  signature: "v2/model/gloo-bfl-flux-2-pro",
+  label: "V2 · FLUX.2 Pro",
+  prompt: "A watercolor lighthouse at sunset.",
+  benign: true,
+  expectRejection: true,
+  maxTokens: 2048,
+  routing: { kind: "model", model: "gloo-bfl-flux-2-pro" },
+};
+
+it("expectRejection: a 4xx on an image-only model is PASS (correctly rejected)", () => {
+  const out = assessV2(
+    IMAGE_ONLY_FIXTURE,
+    400,
+    JSON.stringify({
+      message: "does not support text output. Use /v1/responses",
+    }),
+    Date.now() - 1
+  );
+  expect(out.verdict).toBe("PASS");
+  expect(out.severity).toBe("GREEN");
+  expect(out.model).toBe("gloo-bfl-flux-2-pro");
+});
+
+it("expectRejection: a 2xx on an image-only model is UNEXPECTED_SUCCESS (RED)", () => {
+  // The GAI-6788 regression signature — the image-only model was processed
+  // on the text endpoint instead of being rejected.
+  const out = assessV2(
+    IMAGE_ONLY_FIXTURE,
+    200,
+    JSON.stringify({ choices: [{ message: { content: "" } }] }),
+    Date.now() - 1
+  );
+  expect(out.verdict).toBe("UNEXPECTED_SUCCESS");
+  expect(out.severity).toBe("RED");
+});
+
+it("expectRejection: a 5xx still falls through to server-fault FAIL (RED)", () => {
+  const out = assessV2(
+    IMAGE_ONLY_FIXTURE,
+    503,
+    "upstream unavailable",
+    Date.now() - 1
+  );
+  expect(out.verdict).toBe("FAIL");
+  expect(out.severity).toBe("RED");
+});
+
 it("builds request bodies that match each routing mode", () => {
   expect(buildRequestBody(AUTO)).toEqual({
     messages: [{ role: "user", content: "hi" }],

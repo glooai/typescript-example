@@ -42,7 +42,15 @@ export type Verdict =
    * the guardrail to refuse it, but the model produced a helpful
    * response. Indicates the safety layer has been bypassed — always RED.
    */
-  | "GUARDRAIL_BYPASS";
+  | "GUARDRAIL_BYPASS"
+  /**
+   * `expectRejection` probe (image-only model/family) was NOT rejected:
+   * the platform returned a 2xx for a model that has no text output and
+   * should have been refused on the Chat Completions surface. Indicates
+   * the ai-api GAI-6788 guard regressed (the request is being routed and
+   * the image model processed into an empty completion) — always RED.
+   */
+  | "UNEXPECTED_SUCCESS";
 
 export type ProbeContext = {
   accessToken: string;

@@ -30,15 +30,41 @@ const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
 
 /**
  * Every field the canary uses from the /platform/v2/models response. The
- * endpoint returns a lot more (pricing, context_window, modalities, speed
- * ratings, etc.) but we deliberately only consume what drives probe
- * construction so a benign upstream field rename doesn't break the canary.
+ * endpoint returns a lot more (pricing, context_window, speed ratings,
+ * etc.) but we deliberately only consume what drives probe construction so
+ * a benign upstream field rename doesn't break the canary.
+ *
+ * `outputModalities` is consumed so the probe builders can skip models
+ * that can't return text on the V2 Chat Completions surface (e.g. the
+ * image-only FLUX / Seedream / Grok-Imagine models, whose only output is
+ * an image). Probing those on `/ai/v2/chat/completions` always yields an
+ * empty completion — a self-inflicted RED — because image bytes come back
+ * on a field the Chat Completions envelope doesn't carry. Image generation
+ * is a `/ai/v1/responses` concern, out of scope for this V2 canary.
  */
 export type V2ModelSummary = {
   id: string;
   family: string;
   name: string;
+  /**
+   * Declared output modalities (e.g. `["text"]`, `["image"]`). Defaults to
+   * `["text"]` when the registry omits the field, matching the platform's
+   * own convention that a model without declared output modalities is a
+   * text model. Optional on the type for backwards-compat with callers
+   * that construct summaries inline.
+   */
+  outputModalities?: string[];
 };
+
+/**
+ * True when a model can produce text output on the V2 Chat Completions
+ * surface. Image-only models (no `"text"` in `output_modalities`) return
+ * false. Absent modalities default to text-output (`true`) so a registry
+ * that stops advertising the field doesn't silently drop every probe.
+ */
+export function isTextOutputModel(model: V2ModelSummary): boolean {
+  return (model.outputModalities ?? ["text"]).includes("text");
+}
 
 /**
  * Zod schema for the subset we consume. `.passthrough()` via `.strip()` is
@@ -49,6 +75,10 @@ const ModelEntrySchema = z.object({
   id: z.string().min(1),
   family: z.string().min(1),
   name: z.string().min(1),
+  // Optional: the registry has long carried it, but tolerate its absence
+  // (older snapshots, partial responses) by defaulting to text-output at
+  // the mapping step below rather than rejecting the whole payload.
+  output_modalities: z.array(z.string()).optional(),
 });
 
 const ModelsResponseSchema = z.object({
@@ -111,5 +141,6 @@ export async function fetchV2Models(
     id: entry.id,
     family: entry.family,
     name: entry.name,
+    outputModalities: entry.output_modalities ?? ["text"],
   }));
 }

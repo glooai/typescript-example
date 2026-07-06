@@ -12,6 +12,7 @@ import {
   buildV2RoutingFixtures,
   currentProbeSignatures,
   extractFamilies,
+  imageOnlyFamilies,
   familySlug,
 } from "../../src/fixtures/index.js";
 import type { V2ModelSummary } from "../../src/fixtures/v2-models.js";
@@ -27,6 +28,24 @@ const MODELS: V2ModelSummary[] = [
     id: "gloo-meta-llama-3.1-8b",
     family: "Open Source",
     name: "Llama 3.1 8B",
+  },
+];
+
+// Image-only models (output_modalities without "text") can't return a
+// text completion on the V2 Chat Completions surface — the platform 4xxs
+// them. These fixtures exercise the `expectRejection` marking.
+const IMAGE_ONLY_MODELS: V2ModelSummary[] = [
+  {
+    id: "gloo-bfl-flux-2-pro",
+    family: "Black Forest Labs",
+    name: "FLUX.2 Pro",
+    outputModalities: ["image"],
+  },
+  {
+    id: "gloo-xai-grok-imagine",
+    family: "xAI",
+    name: "Grok Imagine",
+    outputModalities: ["image"],
   },
 ];
 
@@ -71,6 +90,63 @@ it("extractFamilies returns distinct, sorted, non-empty family strings", () => {
     { id: "gloo-empty", family: "", name: "Empty" },
   ]);
   expect(fams).toEqual(["Anthropic", "Open Source", "OpenAI"]);
+});
+
+it("extractFamilies returns every family, image-only included", () => {
+  const fams = extractFamilies([...MODELS, ...IMAGE_ONLY_MODELS]);
+  expect(fams).toEqual([
+    "Anthropic",
+    "Black Forest Labs",
+    "Open Source",
+    "OpenAI",
+    "xAI",
+  ]);
+});
+
+it("imageOnlyFamilies flags all-image families but not mixed ones", () => {
+  const families = imageOnlyFamilies([
+    ...MODELS, // Anthropic / OpenAI / Open Source — all text
+    ...IMAGE_ONLY_MODELS, // Black Forest Labs, xAI — all image-only
+    // A multimodal text+image member makes "Google" NOT image-only.
+    {
+      id: "gloo-google-gemini-3-pro-image",
+      family: "Google",
+      name: "Gemini 3 Pro Image",
+      outputModalities: ["text", "image"],
+    },
+  ]);
+  expect(families.has("Black Forest Labs")).toBe(true);
+  expect(families.has("xAI")).toBe(true);
+  expect(families.has("Google")).toBe(false);
+  expect(families.has("Anthropic")).toBe(false);
+});
+
+it("buildV2DirectModelFixtures probes image-only models with expectRejection", () => {
+  const fixtures = buildV2DirectModelFixtures([
+    ...MODELS,
+    ...IMAGE_ONLY_MODELS,
+  ]);
+  // Every model is probed — text and image-only alike.
+  expect(fixtures.length).toBe(MODELS.length + IMAGE_ONLY_MODELS.length);
+  const flux = fixtures.find(
+    (f) => f.signature === "v2/model/gloo-bfl-flux-2-pro"
+  );
+  const gpt = fixtures.find(
+    (f) => f.signature === "v2/model/gloo-openai-gpt-5.2"
+  );
+  // Image-only → assert the 4xx; text models → normal probe.
+  expect(flux?.expectRejection).toBe(true);
+  expect(gpt?.expectRejection).toBeUndefined();
+});
+
+it("buildV2RoutingFixtures marks image-only families expectRejection, text families normal", () => {
+  const fixtures = buildV2RoutingFixtures([...MODELS, ...IMAGE_ONLY_MODELS]);
+  const bfl = fixtures.find(
+    (f) => f.signature === "v2/family/black-forest-labs"
+  );
+  const openai = fixtures.find((f) => f.signature === "v2/family/openai");
+  expect(bfl?.expectRejection).toBe(true);
+  expect(openai?.expectRejection).toBeUndefined();
 });
 
 it("buildV2FamilyFixtures produces one fixture per distinct family with canonical casing", () => {
@@ -267,6 +343,14 @@ it("V2_SAFETY_JAILBREAK_FIXTURE has expectRefusal set and max_tokens ≥ floor",
     REASONING_MODEL_MIN_MAX_TOKENS
   );
   expect(V2_SAFETY_JAILBREAK_FIXTURE.routing).toEqual({ kind: "auto_routing" });
+});
+
+it("currentProbeSignatures includes image-only model ids (they are probed as expectRejection)", () => {
+  // Image-only models are probed (asserting the platform's 4xx), so their
+  // v2/model/<id> signature belongs in the allowed set like any other.
+  const sigs = currentProbeSignatures(["gloo-text", "gloo-bfl-flux-2-pro"], []);
+  expect(sigs).toContain("v2/model/gloo-text");
+  expect(sigs).toContain("v2/model/gloo-bfl-flux-2-pro");
 });
 
 it("currentProbeSignatures omits family signatures when the snapshot predates the families field (backcompat)", () => {
