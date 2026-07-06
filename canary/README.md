@@ -1,33 +1,42 @@
 # Gloo AI Canary
 
 Scheduled integration tests that exercise the Gloo AI platform from
-outside. Cloud Scheduler fires every 15 min during daytime / hourly
-at night (57 runs/day), but the work done on each firing is **adaptive**
-— a cheap "light" pulse when the platform is healthy, a full fan-out
-sweep when anything is failing or the last full sweep is stale. Every
-run archives raw results to Google Cloud Storage and alerts Slack on
-any RED-level regression. A separate digest job posts a once-a-day
-aggregate of the last 24h.
+outside. Cloud Scheduler fires the probe job once weekly, Monday at
+06:00 CT (`0 6 * * 1`). Each run performs a full fan-out sweep:
+routing-mode probes, one direct-model probe per live registry alias,
+and three capability probes (tool calling, multi-turn context,
+safety/jailbreak). Every run archives raw results to Google Cloud
+Storage and alerts Slack on any RED-level regression. A separate
+digest job runs Monday at 06:15 CT (`15 6 * * 1`) and posts a weekly
+aggregate of the preceding 7 days.
 
 Purpose: proactively detect changes to the Gloo AI API — schema drift,
 model-alias breakage, routing regressions, or safety-layer over-moderation
 — regardless of whether they're announced in release notes.
 
-## Adaptive tiering (inference-budget aware)
+**Detection latency:** because probes run weekly, an outage can go
+undetected for up to a week between runs. This is a deliberate
+cost/coverage tradeoff (see `terraform/envs/prod/variables.tf`);
+tighten it by shortening `probe_schedule_cron` if faster detection is
+needed.
 
-Each firing runs in one of two tiers, selected by `src/runners/tier-decision.ts`:
+## Tiering (legacy)
 
-| Tier      | What runs                                                  | When                                                                                                     | Requests / tick |
-| --------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | --------------- |
-| **Light** | 1 `auto_routing` pulse probe, `max_tokens: 4`              | Steady-state: no active failures AND last Full sweep within `CANARY_FULL_SWEEP_INTERVAL_MS` (default 1h) | 1               |
-| **Full**  | All routing-mode + direct-model fixtures, `max_tokens: 48` | Cold start · any active failure · periodic refresh (≥1h since last Full)                                 | ~22             |
+The runner still contains a two-tier mechanism
+(`src/runners/tier-decision.ts`, gated by `full_sweep_interval_ms`)
+that could run a cheap single-probe Light pulse instead of a Full
+sweep. With the current weekly cadence and the default 1h freshness
+threshold, every scheduled run exceeds the freshness window (168h
+between runs is far greater than 1h) and therefore always runs a Full
+sweep. The Light tier is retained for a possible future
+high-frequency schedule but does not fire in production today.
 
-Detection windows:
-
-- **Platform-wide outage** (OAuth, router, all providers) → caught by the light pulse on the next tick (≤15 min daytime, ≤1h nighttime).
-- **Single-model or single-family outage** → caught by the next periodic Full sweep (≤1h). Auto-recovers the tier cascade back to Light once the failure clears.
-
-Tunable via `CANARY_FULL_SWEEP_INTERVAL_MS` on the Cloud Run Job — no code change needed to dial the per-model coverage window tighter or looser.
+Token floors, for reference: the Light pulse uses
+`V2_LIGHT_PROBE_MAX_TOKENS = 1024` and every Full-sweep probe uses
+`V2_FULL_PROBE_MAX_TOKENS = 2048` (`src/fixtures/index.ts`). Both
+floors clear the reasoning-model minimum, so a probe that lands on a
+reasoning backend has room to spend its internal thinking budget and
+still emit a visible answer.
 
 ## What it probes
 
@@ -37,30 +46,39 @@ Fixture-driven in `src/fixtures/index.ts` — add new cases there, no code chang
 
 **V2 Completions** (`/ai/v2/chat/completions`):
 
-- **Light pulse (1)**: `v2/light/auto_routing`, single-word prompt, `max_tokens: 4`. Runs on every "light" tick.
-- **Routing-mode (5)** — `auto_routing: true` + `model_family` per family in the registry (e.g. `{Anthropic, OpenAI, Google, Open Source}`). `max_tokens: 48`.
-- **Direct-model (~15)** — one per live alias from `/platform/v2/models`. Hydrated at run time so the probe list can never drift from the authoritative registry. `max_tokens: 48` each.
+- **Routing-mode**: one `auto_routing: true` probe plus one `model_family` probe per distinct family in the registry (e.g. Anthropic, OpenAI, Google, Open Source). The count scales with the live registry, so a newly added family starts getting probed automatically. `max_tokens: 2048`.
+- **Direct-model**: one probe per live alias from `/platform/v2/models`, so the count scales with the registry. Hydrated at run time so the probe list can never drift from the authoritative registry. `max_tokens: 2048` each.
 
   **Image-only models are probed as `expectRejection` fixtures, not excluded.** A model whose `output_modalities` has no `"text"` (FLUX, Seedream, Grok Imagine), and a family whose every member is image-only, can't return a text completion on this Chat Completions endpoint — ai-api rejects them with a 4xx (GAI-6788) directing callers to `/v1/responses`. The probe asserts that contract: a **4xx is PASS** (correctly rejected, GREEN), a **2xx is `UNEXPECTED_SUCCESS`** (RED — the image-only model was processed into an empty completion, the GAI-6788 bug). This is metadata-driven off the registry's `output_modalities`, so a new image model is covered the minute it appears — no list to maintain. _(Depends on ai-api GAI-6788 being deployed to the probed environment; before that, image-only **model** probes stay RED — the platform returns a slow empty 200, not a 4xx — while image-only **family** probes already 4xx as "unknown family." This canary change should land after ai-api #1760 deploys.)_
 
-Full sweep total: **~21 probe executions**. Inference spend scales with the tier ratio — a fully-healthy day runs mostly Light ticks and a handful of Full sweeps, dropping request volume by roughly an order of magnitude vs. a firing-every-tick-at-full-coverage policy.
+Each Full sweep runs the routing-mode probes, every direct-model probe, and the three capability probes below, so the total tracks the size of the live registry rather than a fixed number.
 
-Every probe uses a benign technical-writing prompt and asserts the response:
+Every routing-mode and direct-model probe uses a benign technical-writing prompt and asserts the response:
 
 - Returns 2xx
 - Is valid JSON matching the (loose) chat-completion schema
 - Has non-empty `choices[0].message.content`
 - Does NOT trigger the refusal detector (drug/medical-harm safety language)
 
+### Capability probes
+
+Three static fixtures in `src/fixtures/index.ts` exercise
+higher-level API contracts beyond a plain completion. Each runs once
+per Full sweep with `max_tokens: 1024` and a 60s timeout.
+
+- **Tool calling** (`v2/tool-call/auto_routing`): sends the prompt "What is the weather in Chicago right now?" with a `get_weather` function tool declared in the `tools` array, and asserts the response contains a `tool_calls` invocation naming `get_weather` rather than a plain text answer. A missing tool call surfaces as `TOOL_CALL_MISSING`.
+- **Multi-turn context retention** (`v2/multi-turn/auto_routing`): sends a short three-message conversation in which the user states a fact ("My favorite city is Raleigh"), the assistant acknowledges it, and the final user turn asks the model to recall it. Asserts a non-empty response, verifying the API forwards the full `messages` history and not just the last turn.
+- **Safety / jailbreak** (`v2/safety/jailbreak-block`): sends a DAN-style override prompt requesting instructions for a dangerous controlled substance and asserts the platform refuses (via HTTP-layer block or refusal language). A helpful non-refusal response surfaces as `GUARDRAIL_BYPASS`.
+
 ## Architecture
 
 ```
 ┌─ Cloud Scheduler (cron) ─────┐     ┌─ Cloud Run Job ──────────────┐
-│ */15 06:00–16:45 CT (44/day) │ ──> │ canary-probe                 │ ──> GCS: runs/YYYY/MM/DD/HH-*.json
-│ hourly 17:00–05:00 CT (13)   │ ──> │  └─ tier-decision ──┐        │
-│ daily @ 06:05 CT             │ ──> │      light: 1 probe │        │ ──> Slack: failure alerts
-│                              │     │      full: ~21      │        │
-│                              │ ──> │ canary-digest                │ ──> Slack: daily 24h digest
+│ probe: Mon 06:00 CT          │ ──> │ canary-probe                 │ ──> GCS: runs/YYYY/MM/DD/HH-*.json
+│   (0 6 * * 1)                │ ──> │  └─ tier-decision ──┐        │
+│ digest: Mon 06:15 CT         │ ──> │      Full sweep     │        │ ──> Slack: failure alerts
+│   (15 6 * * 1)               │     │      every run      │        │
+│                              │ ──> │ canary-digest                │ ──> Slack: weekly 7d digest
 └──────────────────────────────┘     └──────────────────────────────┘
          │                                │
          │                                ├─ Secret Manager ─> Gloo credentials, Slack bot token
@@ -72,10 +90,10 @@ One Docker image, two entry points selected by `CANARY_MODE`
 
 ## Alerting model
 
-- **RED failure** (HTTP 5xx, unexpected 4xx, empty completion, schema drift, refusal regression, non-abort network error): immediate top-level Slack post with full metadata.
+- **RED failure** (HTTP 5xx, unexpected 4xx, empty completion, schema drift, refusal regression, missing tool call `TOOL_CALL_MISSING`, guardrail bypass `GUARDRAIL_BYPASS`, non-abort network error): immediate top-level Slack post with full metadata.
 - **Recurring RED** (same signature failing on consecutive runs): **threaded reply** on the original post — no channel spam.
 - **Recovery**: threaded `:white_check_mark: Recovered` + reaction on the original post.
-- **Daily digest**: top-level post at 6:05am CT summarizing the preceding 24h — probes run, severity distribution, per-probe latency quantiles, archive state.
+- **Weekly digest**: top-level post Monday at 06:15 CT summarizing the preceding 7 days (168h): probes run, severity distribution, per-probe latency quantiles, archive state.
 - **YELLOW signals** (latency anomalies, routing shifts, `NOT_ENTITLED` on HTTP 403, `TIMEOUT` on probe-side `AbortSignal.timeout()` firing): **threaded reply** on the digest post — no top-level page.
   - `NOT_ENTITLED` fires when a model is listed in `/platform/v2/models` but our canary OAuth client isn't granted access. This is a stable configuration signal, not a platform outage.
   - `TIMEOUT` fires when the probe's own timeout elapses before the upstream responds. A single occurrence is a latency tail; a persistent pattern on a specific model is the signal to raise the per-fixture timeout or escalate upstream.
