@@ -154,10 +154,7 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
       >
         {turns.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-            <p className="text-sm text-muted">
-              Ask something. Responses stream through a Lambda proxy that never
-              exposes the API key.
-            </p>
+            <p className="text-sm text-muted">Ask something to get started.</p>
             <div className="flex flex-wrap justify-center gap-2">
               {SUGGESTIONS.map((suggestion) => (
                 <button

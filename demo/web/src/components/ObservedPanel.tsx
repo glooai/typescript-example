@@ -49,8 +49,7 @@ export function ObservedPanel() {
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
       <div className="flex items-center gap-3">
         <p className="text-sm text-muted">
-          Measured across recent demo traffic. Rows expire automatically after
-          seven days.
+          Real cost and speed from recent traffic.
         </p>
         <button
           type="button"

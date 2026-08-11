@@ -38,8 +38,7 @@ export function App() {
             Gloo AI <span className="text-accent">Completions V2</span>
           </h1>
           <p className="text-xs text-muted">
-            Streaming chat and side by side routing comparison, proxied through
-            a Lambda that holds the API key.
+            Chat, compare models side by side, and see real cost and speed.
           </p>
         </div>
 
