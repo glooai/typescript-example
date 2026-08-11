@@ -1,5 +1,4 @@
 data "aws_route53_zone" "root" {
-  provider     = aws.dns
   name         = "${var.root_zone_name}."
   private_zone = false
 }
@@ -14,7 +13,6 @@ resource "aws_acm_certificate" "site" {
 }
 
 resource "aws_route53_record" "cert_validation" {
-  provider = aws.dns
   for_each = {
     for dvo in aws_acm_certificate.site.domain_validation_options : dvo.domain_name => {
       name  = dvo.resource_record_name
@@ -191,10 +189,9 @@ resource "aws_cloudfront_distribution" "site" {
 }
 
 resource "aws_route53_record" "site" {
-  provider = aws.dns
-  zone_id  = data.aws_route53_zone.root.zone_id
-  name     = var.domain_name
-  type     = "A"
+  zone_id = data.aws_route53_zone.root.zone_id
+  name    = var.domain_name
+  type    = "A"
 
   alias {
     name                   = aws_cloudfront_distribution.site.domain_name

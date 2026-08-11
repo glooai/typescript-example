@@ -41,7 +41,6 @@ resource "aws_acm_certificate" "origin" {
 }
 
 resource "aws_route53_record" "origin_cert_validation" {
-  provider = aws.dns
   for_each = {
     for dvo in aws_acm_certificate.origin.domain_validation_options : dvo.domain_name => {
       name  = dvo.resource_record_name
@@ -63,10 +62,9 @@ resource "aws_acm_certificate_validation" "origin" {
 }
 
 resource "aws_route53_record" "origin" {
-  provider = aws.dns
-  zone_id  = data.aws_route53_zone.root.zone_id
-  name     = var.origin_domain_name
-  type     = "A"
+  zone_id = data.aws_route53_zone.root.zone_id
+  name    = var.origin_domain_name
+  type    = "A"
 
   alias {
     name                   = data.aws_lb.genesis.dns_name

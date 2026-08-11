@@ -22,12 +22,6 @@ variable "aws_profile" {
   default     = "servant-internal"
 }
 
-variable "dns_aws_profile" {
-  description = "Local AWS profile holding the servant.run Route53 hosted zone, a separate account from aws_profile"
-  type        = string
-  default     = "personal"
-}
-
 variable "origin_domain_name" {
   description = "Hostname that resolves to the shared ALB and that CloudFront uses as its /api/* origin. Separate from domain_name, which is an alias for the distribution itself."
   type        = string
