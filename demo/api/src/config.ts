@@ -30,6 +30,13 @@ export type Config = {
    * not arrive through our distribution.
    */
   originSecret: string;
+  /**
+   * Salt for the client IP hash written to the ledger. Terraform generates
+   * one random value per deployment, so the hashes cannot be reversed with a
+   * precomputed table and do not correlate across a rebuild. See
+   * `visitor.ts` for why the address itself is not stored.
+   */
+  visitorSalt: string;
 };
 
 export function loadConfig(): Config {
@@ -37,6 +44,7 @@ export function loadConfig(): Config {
     tableName: requireEnv("DEMO_TABLE_NAME"),
     glooApiKeySecretId: requireEnv("GLOO_API_KEY_SECRET_ID"),
     originSecret: requireEnv("ORIGIN_SECRET"),
+    visitorSalt: requireEnv("VISITOR_SALT"),
   };
 }
 

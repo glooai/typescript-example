@@ -77,6 +77,8 @@ One DynamoDB table, pay-per-request, TTL on `expires_at`. Two entity types:
 | `pk = LEDGER#<UTC date>`, `sk = <ts>#<id>` | One row per proxied call, so the cost and latency view reports measured traffic instead of registry arithmetic. Expires after 7 days.   |
 | `pk = SESSION#<id>`, `sk = MSG#<seq>`      | One row per chat message, so a demo conversation survives a page refresh without any server-side session store. Expires after 12 hours. |
 
+Both entity types also carry an anonymous visitor trace, described below.
+
 DynamoDB rather than Postgres because the only compute is Lambda: there is no
 connection pool to exhaust, and no migration to run before a deploy. No
 secondary indexes, because every read is a Query against a known partition
@@ -88,6 +90,77 @@ Costs are computed from the live `platform/v2/models` registry (which
 publishes per-million-token rates) multiplied by the token counts Gloo
 reports, with cached prompt tokens billed at the cache-read rate. A model the
 registry does not price shows as `unpriced` rather than `$0`.
+
+## Anonymous visitor tracking
+
+Every proxied call is tagged with an opaque anonymous visitor id so a
+person's activity can be followed across requests when debugging something
+or reviewing how much this proof of concept is being used.
+
+### Where the cookie is set, and why there
+
+The proxy Lambda mints it, not CloudFront. `functions/basic-auth.js` is a
+viewer-request function, so it runs before the origin and can only mutate the
+request; it cannot attach a `Set-Cookie` to the response at all. A second
+CloudFront function on viewer-response could, but CloudFront Functions have
+no `crypto`, so the id would come out of `Math.random()`, and it would mean a
+second published function and a second behavior association to maintain. The
+Lambda has real `crypto.randomUUID()` and is the only component that writes
+the rows the id is a trace key for. The trade is that a visitor who loads the
+page and never sends a prompt never gets an id, which is exactly the visitor
+who leaves no rows to correlate.
+
+`GET /api/models` is the one route that deliberately sends no `Set-Cookie`,
+because it is the one cacheable response and a replayed cache hit should not
+replay a cookie. The next uncached call issues it.
+
+### Cookie
+
+`gloo_demo_vid`, holding `v-` plus 32 random hex characters from
+`crypto.randomUUID()`. Nothing about it is derived from anything personal.
+`Path=/`, `Max-Age` 30 days, `Secure`, `HttpOnly`, `SameSite=Lax`.
+
+`HttpOnly` because the SPA never reads it: the browser attaches it to the
+same-origin `/api/*` calls and the Lambda reads it there. `SameSite=Lax`
+rather than `Strict` because both work for the app's own same-origin
+requests, and `Lax` additionally keeps the cookie attached when someone opens
+the demo link from an email or a chat message, which is how this demo gets
+visited and is exactly the continuity the id is for.
+
+### What is captured, and what is not
+
+Technical signals only: the anonymous id, a salted hash of the client IP, the
+User-Agent, and the request timestamp. Nothing is parsed out of message text
+to enrich a visitor's record. The chat transcript is stored separately and
+only so the SPA can replay a conversation after a refresh.
+
+The IP is stored as a salted, truncated SHA-256 rather than the address
+itself. Telling calls from one client apart, and spotting one client hammering
+the demo, both work off a hash, and recovering the address has no use here.
+The salt is a per-deployment `random_password`, so the hashes are not
+reversible with a precomputed table and do not correlate across a rebuild.
+
+All of it rides on the existing rows and the existing `expires_at` TTL, so it
+expires with them: 7 days for ledger rows, 12 hours for conversations. The
+`/api/ledger` response strips the trace, so an IP hash never reaches a
+browser.
+
+### With no cookie
+
+The cookie is optional everywhere. Safari private browsing, ITP, a blocker,
+or a visitor who clears cookies mid-session all behave the same way: the
+Lambda mints an id for that request, records it as `visitor_id_source:
+"issued"` rather than `"cookie"`, and offers the cookie again. Nothing about
+the response changes, no error surfaces, and chat and compare work exactly as
+they do otherwise. Marking the source is what stops a reader from mistaking a
+string of one-request ids for one visitor who came back.
+
+When that happens the SPA's `localStorage` session id, already sent in the
+request body, is recorded next to the visitor id as the fallback correlator.
+The two ids stay separate on purpose: the session id keys a transcript and
+dies with `localStorage`, the visitor id spans sessions and lives in a cookie,
+and either can be missing without the other becoming useless. The frontend
+was not changed for any of this.
 
 ## Local development
 

@@ -30,3 +30,14 @@ resource "random_password" "origin_secret" {
   length  = 48
   special = false
 }
+
+# Salt for the client IP hash the proxy writes onto ledger rows. The demo
+# stores a salted, truncated hash rather than the address itself: correlating
+# calls from one client and spotting one client hammering the demo both work
+# off a hash, and nothing here needs to recover an address. One value per
+# deployment means the hashes are not reversible with a precomputed table and
+# do not correlate across a rebuild.
+resource "random_password" "visitor_salt" {
+  length  = 48
+  special = false
+}

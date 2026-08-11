@@ -18,8 +18,11 @@ import {
   sessionKey,
   sortRowsNewestFirst,
   toLedgerItem,
+  toLedgerRow,
   toSessionItems,
+  type LedgerItem,
 } from "./ledger.js";
+import type { VisitorTrace } from "./visitor.js";
 
 /** DynamoDB caps a BatchWriteItem request at 25 items. */
 const BATCH_LIMIT = 25;
@@ -40,11 +43,15 @@ export function createStore(
   )
 ) {
   return {
-    async recordCall(metrics: CallMetrics, at = new Date()): Promise<void> {
+    async recordCall(
+      metrics: CallMetrics,
+      trace?: VisitorTrace,
+      at = new Date()
+    ): Promise<void> {
       await client.send(
         new PutCommand({
           TableName: tableName,
-          Item: toLedgerItem(metrics, at),
+          Item: toLedgerItem(metrics, at, trace),
         })
       );
     },
@@ -58,9 +65,10 @@ export function createStore(
     async saveSession(
       sessionId: string,
       messages: ChatMessage[],
+      trace?: VisitorTrace,
       at = new Date()
     ): Promise<void> {
-      const items = toSessionItems(sessionId, messages, at);
+      const items = toSessionItems(sessionId, messages, at, trace);
       for (const batch of chunk(items, BATCH_LIMIT)) {
         await client.send(
           new BatchWriteCommand({
@@ -101,7 +109,9 @@ export function createStore(
           )
         )
       );
-      const rows = pages.flatMap((page) => (page.Items ?? []) as LedgerRow[]);
+      const rows = pages.flatMap((page) =>
+        (page.Items ?? []).map((item) => toLedgerRow(item as LedgerItem))
+      );
       return sortRowsNewestFirst(rows, limit);
     },
   };

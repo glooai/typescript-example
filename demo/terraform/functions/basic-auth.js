@@ -6,6 +6,10 @@
 // robots.txt. They are not access control and nothing behind them is
 // sensitive.
 //
+// This is a viewer-request function, so it can only mutate the request. The
+// anonymous visitor cookie is therefore not set here: see
+// demo/api/src/visitor.ts for why the proxy Lambda mints it instead.
+//
 // CloudFront Functions have no crypto or Buffer, so the expected header
 // value is a precomputed literal: base64("gloo:ai").
 var EXPECTED = "Basic Z2xvbzphaQ==";
