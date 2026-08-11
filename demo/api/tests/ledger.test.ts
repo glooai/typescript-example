@@ -8,14 +8,16 @@ import {
   sortRowsNewestFirst,
   toLedgerItem,
   toLedgerRow,
-  toSessionIndexItem,
+  sessionIndexKey,
+  sessionIndexUpdate,
+  sessionPatchUpdate,
   toSessionItems,
   toSessionSummary,
   sessionPreview,
-  sortSessionsNewestFirst,
+  sortSessionsForHistory,
   visitorKey,
 } from "../src/ledger.js";
-import type { CallMetrics, LedgerRow } from "../src/types.js";
+import type { CallMetrics, LedgerRow, SessionSummary } from "../src/types.js";
 import type { VisitorTrace } from "../src/visitor.js";
 
 const trace: VisitorTrace = {
@@ -195,75 +197,111 @@ describe("sessionPreview", () => {
   });
 });
 
-describe("toSessionIndexItem", () => {
+describe("sessionIndexUpdate", () => {
   const messages = [
     { role: "user" as const, content: "hello" },
     { role: "assistant" as const, content: "hi there" },
   ];
 
   it("keys one summary row per conversation under the visitor", () => {
-    const item = toSessionIndexItem(
-      trace.visitor_id,
-      "session-abc12345",
-      messages,
-      at
-    );
-
-    expect(item.pk).toBe(visitorKey(trace.visitor_id));
-    expect(item.sk).toBe("SESSION#session-abc12345");
-    expect(item.entity).toBe("session_index");
-    expect(item.session_id).toBe("session-abc12345");
-    expect(item.last_message_at).toBe(at.toISOString());
-    expect(item.preview).toBe("hello");
+    expect(sessionIndexKey(trace.visitor_id, "session-abc12345")).toEqual({
+      pk: visitorKey(trace.visitor_id),
+      sk: "SESSION#session-abc12345",
+    });
   });
 
-  it("overwrites its own row on a later turn instead of adding one", () => {
-    const later = new Date(at.getTime() + 60_000);
-    const first = toSessionIndexItem(
-      trace.visitor_id,
-      "session-abc12345",
-      messages,
-      at
-    );
-    const second = toSessionIndexItem(
-      trace.visitor_id,
-      "session-abc12345",
-      [...messages, { role: "user" as const, content: "and again" }],
-      later
-    );
+  it("sets recency and preview without naming the flags a visitor owns", () => {
+    const update = sessionIndexUpdate("session-abc12345", messages, at);
 
-    expect(second.pk).toBe(first.pk);
-    expect(second.sk).toBe(first.sk);
-    expect(second.last_message_at).toBe(later.toISOString());
+    expect(update.ExpressionAttributeValues).toEqual({
+      ":entity": "session_index",
+      ":expires_at": Math.floor(at.getTime() / 1000) + SESSION_TTL_SECONDS,
+      ":session_id": "session-abc12345",
+      ":last_message_at": at.toISOString(),
+      ":preview": "hello",
+    });
+    expect(update.UpdateExpression).not.toMatch(/pinned|archived|title/);
   });
 
-  it("expires with the transcript it describes", () => {
-    const item = toSessionIndexItem(
-      trace.visitor_id,
-      "session-abc12345",
-      messages,
-      at
-    );
+  it("aliases every attribute so a reserved word cannot break a write", () => {
+    const update = sessionIndexUpdate("session-abc12345", messages, at);
 
-    expect(item.expires_at).toBe(
-      Math.floor(at.getTime() / 1000) + SESSION_TTL_SECONDS
-    );
+    for (const name of Object.keys(update.ExpressionAttributeNames)) {
+      expect(update.UpdateExpression).toContain(name);
+    }
+    expect(update.UpdateExpression).toMatch(/^SET #/);
+  });
+});
+
+describe("sessionPatchUpdate", () => {
+  it("flags a rename as the visitor's own in the same write", () => {
+    const update = sessionPatchUpdate({ title: "Psalm 23 outline" });
+
+    expect(update?.ExpressionAttributeValues).toEqual({
+      ":title": "Psalm 23 outline",
+      ":title_is_custom": true,
+    });
+  });
+
+  it("changes only what the patch asked for", () => {
+    expect(
+      sessionPatchUpdate({ pinned: true })?.ExpressionAttributeValues
+    ).toEqual({ ":pinned": true });
+    expect(
+      sessionPatchUpdate({ archived: true })?.ExpressionAttributeValues
+    ).toEqual({ ":archived": true });
+  });
+
+  it("writes false rather than dropping the attribute when a flag is cleared", () => {
+    expect(
+      sessionPatchUpdate({ pinned: false })?.ExpressionAttributeValues
+    ).toEqual({ ":pinned": false });
+    expect(
+      sessionPatchUpdate({ archived: false })?.ExpressionAttributeValues
+    ).toEqual({ ":archived": false });
+  });
+
+  it("is nothing at all when the patch asks for nothing", () => {
+    expect(sessionPatchUpdate({})).toBeNull();
   });
 });
 
 describe("toSessionSummary", () => {
   it("reads a stored row back", () => {
-    const item = toSessionIndexItem(
-      trace.visitor_id,
-      "session-abc12345",
-      [{ role: "user", content: "hello" }],
-      at
-    );
-
-    expect(toSessionSummary(item)).toEqual({
+    expect(
+      toSessionSummary({
+        session_id: "session-abc12345",
+        last_message_at: at.toISOString(),
+        preview: "hello",
+        title: "Reading Psalm 23",
+        title_is_custom: true,
+        pinned: true,
+        archived: true,
+      })
+    ).toEqual({
       id: "session-abc12345",
       lastMessageAt: at.toISOString(),
       preview: "hello",
+      title: "Reading Psalm 23",
+      pinned: true,
+      archived: true,
+    });
+  });
+
+  it("reads a row written before any of the flags existed", () => {
+    expect(
+      toSessionSummary({
+        session_id: "session-abc12345",
+        last_message_at: at.toISOString(),
+        preview: "hello",
+      })
+    ).toEqual({
+      id: "session-abc12345",
+      lastMessageAt: at.toISOString(),
+      preview: "hello",
+      title: null,
+      pinned: false,
+      archived: false,
     });
   });
 
@@ -273,11 +311,17 @@ describe("toSessionSummary", () => {
         session_id: "session-abc12345",
         last_message_at: at.toISOString(),
       })
-    ).toEqual({
-      id: "session-abc12345",
-      lastMessageAt: at.toISOString(),
-      preview: "",
+    ).toMatchObject({ preview: "", title: null });
+  });
+
+  it("does not leak whether a title was typed or generated", () => {
+    const summary = toSessionSummary({
+      session_id: "s-1",
+      last_message_at: at.toISOString(),
+      title_is_custom: true,
     });
+
+    expect(summary).not.toHaveProperty("title_is_custom");
   });
 
   it("drops rows that could not be opened or ordered", () => {
@@ -294,19 +338,66 @@ describe("toSessionSummary", () => {
   });
 });
 
-describe("sortSessionsNewestFirst", () => {
+describe("sortSessionsForHistory", () => {
+  function summary(
+    id: string,
+    lastMessageAt: string,
+    pinned = false
+  ): SessionSummary {
+    return {
+      id,
+      lastMessageAt,
+      preview: id,
+      title: null,
+      pinned,
+      archived: false,
+    };
+  }
+
   it("orders by last message and applies the cap", () => {
     const sessions = [
-      { id: "a", lastMessageAt: "2026-08-11T09:00:00.000Z", preview: "a" },
-      { id: "b", lastMessageAt: "2026-08-11T11:00:00.000Z", preview: "b" },
-      { id: "c", lastMessageAt: "2026-08-11T10:00:00.000Z", preview: "c" },
+      summary("a", "2026-08-11T09:00:00.000Z"),
+      summary("b", "2026-08-11T11:00:00.000Z"),
+      summary("c", "2026-08-11T10:00:00.000Z"),
     ];
 
-    expect(sortSessionsNewestFirst(sessions, 2).map((s) => s.id)).toEqual([
+    expect(sortSessionsForHistory(sessions, 2).map((s) => s.id)).toEqual([
       "b",
       "c",
     ]);
     expect(sessions[0]?.id).toBe("a");
+  });
+
+  it("floats every pinned conversation above every unpinned one", () => {
+    const sessions = [
+      summary("newest", "2026-08-11T12:00:00.000Z"),
+      summary("pinned-old", "2026-08-11T08:00:00.000Z", true),
+      summary("middle", "2026-08-11T10:00:00.000Z"),
+      summary("pinned-new", "2026-08-11T11:00:00.000Z", true),
+    ];
+
+    expect(sortSessionsForHistory(sessions, 10).map((s) => s.id)).toEqual([
+      "pinned-new",
+      "pinned-old",
+      "newest",
+      "middle",
+    ]);
+  });
+
+  it("keeps chronological order inside each group", () => {
+    const sessions = [
+      summary("p-old", "2026-08-11T08:00:00.000Z", true),
+      summary("p-new", "2026-08-11T09:00:00.000Z", true),
+      summary("u-old", "2026-08-11T10:00:00.000Z"),
+      summary("u-new", "2026-08-11T11:00:00.000Z"),
+    ];
+
+    expect(sortSessionsForHistory(sessions, 10).map((s) => s.id)).toEqual([
+      "p-new",
+      "p-old",
+      "u-new",
+      "u-old",
+    ]);
   });
 });
 

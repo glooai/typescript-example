@@ -11,6 +11,7 @@ import type {
   LedgerRow,
   ModelSummary,
   RoutingSelection,
+  SessionPatch,
   SessionSummary,
 } from "./types";
 
@@ -83,11 +84,32 @@ export async function fetchSession(
  * than an error, and the caller renders that as "no history yet".
  */
 export async function fetchSessions(
-  signal?: AbortSignal
+  options: { archived?: boolean; signal?: AbortSignal } = {}
 ): Promise<SessionSummary[]> {
-  const response = await fetch("/api/sessions", { signal });
+  const response = await fetch(
+    options.archived ? "/api/sessions?archived=1" : "/api/sessions",
+    { signal: options.signal }
+  );
   const body = await readJson<{ sessions: SessionSummary[] }>(response);
   return body.sessions;
+}
+
+/** Pin, rename, or archive one of this browser's own past conversations. */
+export async function patchSession(
+  sessionId: string,
+  patch: SessionPatch,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await fetch(
+    `/api/session?id=${encodeURIComponent(sessionId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+      signal,
+    }
+  );
+  await readJson<{ ok: true }>(response);
 }
 
 export async function runComparison(options: {

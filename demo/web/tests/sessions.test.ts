@@ -9,6 +9,9 @@ function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
     id: "s-1",
     lastMessageAt: "2026-08-11T12:00:00.000Z",
     preview: "How does Psalm 23 read?",
+    title: null,
+    pinned: false,
+    archived: false,
     ...overrides,
   };
 }
@@ -47,12 +50,16 @@ describe("historyEntries", () => {
         title: "How does Psalm 23 read?",
         when: "just now",
         active: false,
+        pinned: false,
+        archived: false,
       },
       {
         id: "s-2",
         title: "How does Psalm 23 read?",
         when: "2h ago",
         active: true,
+        pinned: false,
+        archived: false,
       },
     ]);
   });
@@ -61,6 +68,32 @@ describe("historyEntries", () => {
     const [entry] = historyEntries([session({ preview: "   " })], "s-9", now);
 
     expect(entry?.title).toBe("Untitled conversation");
+  });
+
+  it("prefers a stored title over the opening question", () => {
+    const [entry] = historyEntries(
+      [session({ title: "Reading Psalm 23" })],
+      "s-9",
+      now
+    );
+
+    expect(entry?.title).toBe("Reading Psalm 23");
+  });
+
+  it("falls back to the opening question until a title exists", () => {
+    const [entry] = historyEntries([session({ title: null })], "s-9", now);
+
+    expect(entry?.title).toBe("How does Psalm 23 read?");
+  });
+
+  it("carries the pin and archive state the row's actions need", () => {
+    const [entry] = historyEntries(
+      [session({ pinned: true, archived: true })],
+      "s-9",
+      now
+    );
+
+    expect(entry).toMatchObject({ pinned: true, archived: true });
   });
 
   it("keeps the server's order", () => {

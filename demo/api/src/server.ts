@@ -10,7 +10,7 @@
  * into a chunked HTTP response keeps that and drops the runtime-specific
  * `awslambda.HttpResponseStream` shim.
  *
- * `node:http` rather than a framework: the surface is six fixed routes with
+ * `node:http` rather than a framework: the surface is a handful of fixed routes with
  * hand-written JSON bodies, and the one route that matters streams raw
  * frames into the socket, which is exactly the layer any framework would
  * have to be talked out of the way of.
@@ -35,8 +35,17 @@ import type { Config } from "./config.js";
 import { createAccumulator, toMetrics, type GlooClient } from "./gloo.js";
 import { rollupByModel } from "./ledger.js";
 import { createRegistryLoader } from "./pricing.js";
-import { chatRequestSchema, compareRequestSchema } from "./routing.js";
+import {
+  chatRequestSchema,
+  compareRequestSchema,
+  sessionPatchSchema,
+} from "./routing.js";
 import type { Store } from "./store.js";
+import {
+  normalizeTitle,
+  shouldGenerateTitle,
+  titlePromptMessages,
+} from "./title.js";
 import type {
   CallMetrics,
   ChatMessage,
@@ -146,6 +155,54 @@ async function persist(
   ]);
 }
 
+/**
+ * The routing used to name a conversation. Auto routing rather than a pinned
+ * model id, both because it is what this demo is demonstrating and because a
+ * six-word title is exactly the trivial prompt auto routing is meant to send
+ * to the cheap tier.
+ */
+const TITLE_ROUTING: RoutingSelection = { mode: "auto_routing" };
+
+/**
+ * Name a conversation from its first exchange and store the result.
+ *
+ * Never awaited by the request that triggers it: this is a second, real,
+ * billed Gloo call, and the visitor's answer has already been streamed and
+ * closed by the time it starts. Every failure is swallowed for the same
+ * reason a ledger write failure is - a chat that worked must not be reported
+ * as broken because the cosmetic label on its history entry could not be
+ * produced.
+ *
+ * Deliberately not written to the ledger. The Observed view is a record of
+ * the calls the Chat and Compare panels made on a visitor's behalf, and
+ * folding a twelve-token housekeeping call into the per-model latency and
+ * cost averages would misreport what those two panels actually cost.
+ */
+async function nameSession(
+  store: Store,
+  gloo: GlooClient,
+  visitorId: string,
+  sessionId: string,
+  messages: ChatMessage[],
+  reply: string
+): Promise<void> {
+  try {
+    const accumulator = await gloo.complete(
+      titlePromptMessages(messages, reply),
+      TITLE_ROUTING
+    );
+    const title = normalizeTitle(accumulator.text);
+    if (title) {
+      await store.applyGeneratedTitle(visitorId, sessionId, title);
+    }
+  } catch (error) {
+    console.error(
+      "title generation failed",
+      error instanceof Error ? error.message : error
+    );
+  }
+}
+
 async function handleChat(
   response: ServerResponse,
   body: unknown,
@@ -203,6 +260,19 @@ async function handleChat(
         { role: "assistant" as const, content: accumulator.text },
       ],
     });
+    // Gated on the transcript this request carries rather than on anything
+    // the client asserts, so a conversation is named once, on its first
+    // completed reply, whatever the client believes about its own state.
+    if (trace.visitor_id && shouldGenerateTitle(messages)) {
+      void nameSession(
+        store,
+        gloo,
+        trace.visitor_id,
+        sessionId,
+        messages,
+        accumulator.text
+      );
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "upstream failure";
     response.write(sseFrame({ type: "error", message }));
@@ -330,14 +400,21 @@ async function handleModels(response: ServerResponse): Promise<void> {
   respond(response, 200, { models }, { "Cache-Control": "max-age=300" });
 }
 
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+
+function readSessionId(url: URL): string | null {
+  const sessionId = url.searchParams.get("id");
+  return sessionId && SESSION_ID_PATTERN.test(sessionId) ? sessionId : null;
+}
+
 async function handleSession(
   response: ServerResponse,
   url: URL,
   store: Store,
   visitor: VisitorContext
 ): Promise<void> {
-  const sessionId = url.searchParams.get("id");
-  if (!sessionId || !/^[A-Za-z0-9_-]{8,64}$/.test(sessionId)) {
+  const sessionId = readSessionId(url);
+  if (!sessionId) {
     respond(
       response,
       400,
@@ -355,12 +432,78 @@ async function handleSession(
 }
 
 /**
+ * Pin, rename, or archive one of the caller's own conversations. The change
+ * lands on the summary row in the caller's visitor partition, so a caller can
+ * only ever act on a conversation their own history already lists; anything
+ * else is a 404 and not a write.
+ *
+ * Archiving is a soft delete and the only kind offered: the transcript stays
+ * in the table and expires on the same twelve-hour TTL as every other
+ * conversation, so "archived" changes which list a conversation appears in
+ * and nothing about how long it is kept.
+ */
+async function handleSessionPatch(
+  response: ServerResponse,
+  url: URL,
+  body: unknown,
+  store: Store,
+  visitor: VisitorContext
+): Promise<void> {
+  const sessionId = readSessionId(url);
+  if (!sessionId) {
+    respond(
+      response,
+      400,
+      { error: "invalid session id" },
+      visitorHeaders(visitor)
+    );
+    return;
+  }
+  const parsed = sessionPatchSchema.safeParse(body);
+  if (!parsed.success) {
+    respond(
+      response,
+      400,
+      { error: parsed.error.issues[0]?.message ?? "invalid" },
+      visitorHeaders(visitor)
+    );
+    return;
+  }
+
+  const patch = { ...parsed.data };
+  if (patch.title !== undefined) {
+    const title = normalizeTitle(patch.title);
+    if (!title) {
+      respond(
+        response,
+        400,
+        { error: "invalid title" },
+        visitorHeaders(visitor)
+      );
+      return;
+    }
+    patch.title = title;
+  }
+
+  const changed = await store.patchSession(visitor.visitorId, sessionId, patch);
+  if (!changed) {
+    respond(response, 404, { error: "not found" }, visitorHeaders(visitor));
+    return;
+  }
+  respond(response, 200, { ok: true }, visitorHeaders(visitor));
+}
+
+/**
  * The conversations belonging to the caller's own visitor id. The id comes
  * from the cookie and never from the query string, so this route cannot be
  * used to read someone else's history by guessing an id.
+ *
+ * `?archived=1` returns the archived ones instead of hiding them, which is
+ * what makes archiving recoverable rather than a delete with a longer name.
  */
 async function handleSessions(
   response: ServerResponse,
+  url: URL,
   store: Store,
   visitor: VisitorContext
 ): Promise<void> {
@@ -368,7 +511,11 @@ async function handleSessions(
     response,
     200,
     {
-      sessions: await store.listSessions(visitor.visitorId, SESSION_PAGE_SIZE),
+      sessions: await store.listSessions(
+        visitor.visitorId,
+        SESSION_PAGE_SIZE,
+        url.searchParams.get("archived") === "1"
+      ),
     },
     visitorHeaders(visitor)
   );
@@ -441,8 +588,18 @@ async function route(
     await handleSession(response, url, deps.store, visitor);
     return;
   }
+  if (method === "PATCH" && path === "/api/session") {
+    await handleSessionPatch(
+      response,
+      url,
+      await readJsonBody(request),
+      deps.store,
+      visitor
+    );
+    return;
+  }
   if (method === "GET" && path === "/api/sessions") {
-    await handleSessions(response, deps.store, visitor);
+    await handleSessions(response, url, deps.store, visitor);
     return;
   }
   respond(response, 404, { error: "not found" });

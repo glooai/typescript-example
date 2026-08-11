@@ -155,11 +155,11 @@ not fix either and would drop live streams to do it.
 
 One DynamoDB table, pay-per-request, TTL on `expires_at`. Three entity types:
 
-| Key                                        | Why it exists                                                                                                                            |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `pk = LEDGER#<UTC date>`, `sk = <ts>#<id>` | One row per proxied call, so the cost and latency view reports measured traffic instead of registry arithmetic. Expires after 7 days.    |
-| `pk = SESSION#<id>`, `sk = MSG#<seq>`      | One row per chat message, so a demo conversation survives a page refresh without any server-side session store. Expires after 12 hours.  |
-| `pk = VISITOR#<id>`, `sk = SESSION#<id>`   | One summary row per conversation a visitor has had, so the Chat view can list past conversations and reopen one. Expires after 12 hours. |
+| Key                                        | Why it exists                                                                                                                                     |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pk = LEDGER#<UTC date>`, `sk = <ts>#<id>` | One row per proxied call, so the cost and latency view reports measured traffic instead of registry arithmetic. Expires after 7 days.             |
+| `pk = SESSION#<id>`, `sk = MSG#<seq>`      | One row per chat message, so a demo conversation survives a page refresh without any server-side session store. Expires after 12 hours.           |
+| `pk = VISITOR#<id>`, `sk = SESSION#<id>`   | One summary row per conversation a visitor has had, so the Chat view can list, name, pin, and archive past conversations. Expires after 12 hours. |
 
 The ledger and message rows also carry an anonymous visitor trace, described
 below.
@@ -179,10 +179,10 @@ The summary row is what makes `GET /api/sessions` a single Query. The
 alternative, a global secondary index keyed on the visitor id over the message
 rows, would project every message of every conversation into the index, bill
 for that second copy of the transcripts, and still need a dedupe per
-conversation on the read. One row per conversation, written in the same
-`BatchWriteItem` as the transcript, costs a single extra write unit per turn
-and reads back in one Query, which is the pattern the rest of this table
-already follows.
+conversation on the read. One row per conversation, written alongside the
+transcript on every turn, costs a single extra write unit per turn and reads
+back in one Query, which is the pattern the rest of this table already
+follows.
 
 The sort key is the conversation id rather than its timestamp, so a
 conversation that is rewritten on every turn overwrites its own summary
@@ -195,6 +195,53 @@ The visitor id comes from the cookie and never from the query string, so the
 route only ever lists the caller's own conversations. A browser with no
 cookie is issued a fresh id per request, gets an empty list, and sees "No past
 chats yet." instead of an error.
+
+### Pinning, renaming, archiving
+
+The summary row also carries `pinned`, `archived`, `title`, and
+`title_is_custom`, set by `PATCH /api/session?id=<id>`. They are extra
+attributes on an item type that already exists, which in DynamoDB is a write
+and not a migration, so nothing in Terraform describes them; the one
+infrastructure change any of this needed was adding `dynamodb:UpdateItem` to
+the task role.
+
+The per-turn write is an `UpdateItem` of the recency attributes rather than a
+`PutItem` of the whole row, because a put would silently unpin, un-rename,
+and unarchive a conversation the moment it was spoken to again. Pinned
+conversations sort ahead of the rest and keep their chronological order inside
+each group, so pinning reorders the list without disturbing it.
+
+Archiving is a soft delete and the only kind offered. The conversation leaves
+the default list, keeps its transcript, and expires on the same twelve-hour
+TTL as everything else; `GET /api/sessions?archived=1` lists the archived ones
+so the History panel can put them back. A hard delete would be a second
+destructive action whose only distinction from the TTL is impatience.
+
+### Automatic names
+
+When a conversation's first assistant reply finishes, the API asks Gloo for a
+short name for it and stores that on the summary row. The gate is the
+transcript the request carried and not a client flag: exactly one user message
+means the first turn, which makes naming fire once per conversation whatever
+the client believes about its own state.
+
+The call is not awaited. It is a second real, billed Gloo call, and the
+visitor's answer has already streamed and closed by the time it starts;
+every failure is swallowed, because a chat that worked must not report itself
+broken over a cosmetic label. The name lands before the next time the History
+panel is opened, which is the only place it is rendered, so nothing needed a
+new SSE frame or a poll to deliver it. It is deliberately not written to the
+ledger: the Observed view describes what the Chat and Compare panels cost, and
+a twelve-token housekeeping call folded into those averages would misreport
+that.
+
+Titles are capped at 40 characters. The prompt asks for a title inside that
+budget and the code enforces it on the way in, truncating on a word boundary
+because a title cut mid-word reads as a bug rather than as a shortened title.
+A name the visitor typed is never overwritten by a generated one: the rename
+sets `title_is_custom`, and the generated title is written under a condition
+on that attribute's absence, so a rename that lands while generation is still
+in flight still wins.
 
 Costs are computed from the live `platform/v2/models` registry (which
 publishes per-million-token rates) multiplied by the token counts Gloo

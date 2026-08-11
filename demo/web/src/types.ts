@@ -54,6 +54,17 @@ export type SessionSummary = {
   id: string;
   lastMessageAt: string;
   preview: string;
+  /** Auto-generated or user-supplied label; null until either has happened. */
+  title: string | null;
+  pinned: boolean;
+  archived: boolean;
+};
+
+/** `PATCH /api/session?id=<id>` body. Every field is optional. */
+export type SessionPatch = {
+  pinned?: boolean;
+  archived?: boolean;
+  title?: string;
 };
 
 export type ModelSummary = {

@@ -123,6 +123,10 @@ data "aws_iam_policy_document" "task" {
     actions = [
       "dynamodb:PutItem",
       "dynamodb:BatchWriteItem",
+      # The session summary row is updated attribute by attribute rather than
+      # replaced, so a turn cannot overwrite the pin, title, and archive state
+      # a visitor set on it by hand.
+      "dynamodb:UpdateItem",
       "dynamodb:Query",
     ]
     resources = [aws_dynamodb_table.demo.arn]

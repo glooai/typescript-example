@@ -5,7 +5,9 @@ import {
   compareRequestSchema,
   describeSelection,
   LIMITS,
+  sessionPatchSchema,
 } from "../src/routing.js";
+import { TITLE_MAX_CHARS } from "../src/title.js";
 
 const sessionId = "session-abcdef123";
 
@@ -165,5 +167,34 @@ describe("compareRequestSchema", () => {
       ],
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("sessionPatchSchema", () => {
+  it("accepts each change on its own", () => {
+    expect(sessionPatchSchema.safeParse({ pinned: true }).success).toBe(true);
+    expect(sessionPatchSchema.safeParse({ archived: true }).success).toBe(true);
+    expect(sessionPatchSchema.safeParse({ title: "Psalm 23" }).success).toBe(
+      true
+    );
+  });
+
+  it("refuses a body that asks for nothing", () => {
+    expect(sessionPatchSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("holds a typed title to the same cap a generated one gets", () => {
+    expect(
+      sessionPatchSchema.safeParse({ title: "a".repeat(TITLE_MAX_CHARS) })
+        .success
+    ).toBe(true);
+    expect(
+      sessionPatchSchema.safeParse({ title: "a".repeat(TITLE_MAX_CHARS + 1) })
+        .success
+    ).toBe(false);
+  });
+
+  it("refuses an empty title rather than blanking a conversation", () => {
+    expect(sessionPatchSchema.safeParse({ title: "" }).success).toBe(false);
   });
 });
