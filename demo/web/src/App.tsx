@@ -66,7 +66,7 @@ export function App() {
               className={`rounded-lg px-3.5 py-1.5 text-sm transition ${
                 tab === entry.id
                   ? "bg-raised text-body"
-                  : "text-muted hover:text-soft"
+                  : "text-muted hover:bg-inset hover:text-soft"
               }`}
             >
               {entry.label}
