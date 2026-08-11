@@ -137,6 +137,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Debug key presence (temporary, prints length only)
+        run: |
+          echo "GLOO_AI_API_KEY length: ${#GLOO_AI_API_KEY}"
+          echo "starts with test-: $(echo "$GLOO_AI_API_KEY" | grep -c '^test-' || true)"
+
       - name: Test
         run: pnpm run test
 
