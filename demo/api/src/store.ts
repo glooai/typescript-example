@@ -25,23 +25,32 @@ import {
   GENERATED_TITLE_CONDITION,
   generatedTitleUpdate,
   recentLedgerPartitions,
+  selectSessionPage,
   sessionIndexKey,
   sessionIndexUpdate,
   sessionKey,
   sessionPatchUpdate,
   sortRowsNewestFirst,
-  sortSessionsForHistory,
   toLedgerItem,
   toLedgerRow,
   toSessionItems,
   toSessionSummary,
   visitorKey,
   type LedgerItem,
+  type SessionPage,
 } from "./ledger.js";
 import type { VisitorTrace } from "./visitor.js";
 
 /** DynamoDB caps a BatchWriteItem request at 25 items. */
 const BATCH_LIMIT = 25;
+
+/**
+ * How many Query responses one history read will follow. A visitor partition
+ * holds one small row per conversation started in the last twelve hours, so
+ * this is never reached; it exists so a pathological partition costs a bounded
+ * number of reads instead of looping.
+ */
+const MAX_SESSION_READS = 10;
 
 /**
  * A conditional write that was refused. This is an expected outcome on both
@@ -199,35 +208,56 @@ export function createStore(
     },
 
     /**
-     * A visitor's past conversations, pinned first then newest first. An
-     * unknown visitor is an empty list rather than an error: a browser that
-     * refuses the cookie is issued a new id on every request, so "no history"
-     * is the correct and expected answer for it.
+     * One page of a visitor's past conversations. An unknown visitor is an
+     * empty page rather than an error: a browser that refuses the cookie is
+     * issued a new id on every request, so "no history" is the correct and
+     * expected answer for it.
      *
-     * Archived conversations are excluded unless asked for. The split is done
-     * here rather than with a DynamoDB FilterExpression because the query
-     * reads one small partition either way and the two views would otherwise
-     * be two different reads of the same rows.
+     * The whole partition is read and then filtered, searched, ordered, and
+     * sliced in process. That is not a shortcut around DynamoDB's paging: the
+     * partition is one visitor's conversations inside a twelve-hour TTL, so it
+     * is small and bounded, while every order this list is shown in (pinned
+     * first, then recency, or relevance under a search) is derived from
+     * attributes rather than from the sort key, so no server-side page
+     * boundary lines up with a page the visitor sees. `LastEvaluatedKey` is
+     * used for what it can honestly answer here, which is making sure a
+     * partition larger than one response is read whole rather than truncated.
      */
     async listSessions(
       visitorId: string,
-      limit: number,
-      archived = false
-    ): Promise<SessionSummary[]> {
-      const result = await client.send(
-        new QueryCommand({
-          TableName: tableName,
-          KeyConditionExpression: "pk = :pk",
-          ExpressionAttributeValues: { ":pk": visitorKey(visitorId) },
-        })
-      );
-      const sessions = (result.Items ?? [])
-        .map(toSessionSummary)
-        .filter(
-          (session): session is SessionSummary =>
-            session !== null && session.archived === archived
+      options: {
+        limit: number;
+        archived?: boolean;
+        query?: string;
+        cursor?: string | null;
+      }
+    ): Promise<SessionPage> {
+      const items: Record<string, unknown>[] = [];
+      let startKey: Record<string, unknown> | undefined;
+      let reads = 0;
+      do {
+        const result = await client.send(
+          new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: "pk = :pk",
+            ExpressionAttributeValues: { ":pk": visitorKey(visitorId) },
+            ExclusiveStartKey: startKey,
+          })
         );
-      return sortSessionsForHistory(sessions, limit);
+        items.push(...(result.Items ?? []));
+        startKey = result.LastEvaluatedKey;
+        reads += 1;
+      } while (startKey && reads < MAX_SESSION_READS);
+
+      const sessions = items
+        .map(toSessionSummary)
+        .filter((session): session is SessionSummary => session !== null);
+      return selectSessionPage(sessions, {
+        archived: options.archived ?? false,
+        query: options.query,
+        limit: options.limit,
+        cursor: options.cursor,
+      });
     },
 
     async recentCalls(limit: number, now = new Date()): Promise<LedgerRow[]> {

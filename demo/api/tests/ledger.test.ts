@@ -15,6 +15,10 @@ import {
   toSessionSummary,
   sessionPreview,
   sortSessionsForHistory,
+  scoreSessionMatch,
+  selectSessionPage,
+  decodeSessionCursor,
+  encodeSessionCursor,
   visitorKey,
 } from "../src/ledger.js";
 import type { CallMetrics, LedgerRow, SessionSummary } from "../src/types.js";
@@ -398,6 +402,156 @@ describe("sortSessionsForHistory", () => {
       "u-new",
       "u-old",
     ]);
+  });
+});
+
+describe("session search and paging", () => {
+  function summary(overrides: Partial<SessionSummary>): SessionSummary {
+    return {
+      id: "s-1",
+      lastMessageAt: "2026-08-11T10:00:00.000Z",
+      preview: "",
+      title: null,
+      pinned: false,
+      archived: false,
+      ...overrides,
+    };
+  }
+
+  it("ranks an exact title above a prefix, a substring, and a preview hit", () => {
+    const query = "psalm 23";
+    expect(scoreSessionMatch(summary({ title: "Psalm 23" }), query)).toBe(4);
+    expect(
+      scoreSessionMatch(summary({ title: "Psalm 23 Sermon Outline" }), query)
+    ).toBe(3);
+    expect(
+      scoreSessionMatch(summary({ title: "Outline on Psalm 23" }), query)
+    ).toBe(2);
+    expect(
+      scoreSessionMatch(summary({ preview: "Read me Psalm 23." }), query)
+    ).toBe(1);
+    expect(scoreSessionMatch(summary({ title: "Who is Jesus" }), query)).toBe(
+      0
+    );
+  });
+
+  it("ignores case and surrounding whitespace on both sides", () => {
+    expect(
+      scoreSessionMatch(summary({ title: "Psalm  23" }), "  PSALM 23 ")
+    ).toBe(4);
+  });
+
+  it("matches nothing when the query is empty", () => {
+    expect(scoreSessionMatch(summary({ title: "Psalm 23" }), "   ")).toBe(0);
+  });
+
+  it("lets relevance outrank a pin while a search is running", () => {
+    const page = selectSessionPage(
+      [
+        summary({
+          id: "pinned",
+          title: "Notes on Psalm 23 and grace",
+          pinned: true,
+        }),
+        summary({ id: "named", title: "Psalm 23" }),
+      ],
+      { archived: false, query: "psalm 23", limit: 10 }
+    );
+
+    expect(page.sessions.map((session) => session.id)).toEqual([
+      "named",
+      "pinned",
+    ]);
+  });
+
+  it("falls back to pinned-then-recent with no search", () => {
+    const page = selectSessionPage(
+      [
+        summary({ id: "newest", lastMessageAt: "2026-08-11T12:00:00.000Z" }),
+        summary({
+          id: "pinned",
+          lastMessageAt: "2026-08-11T08:00:00.000Z",
+          pinned: true,
+        }),
+      ],
+      { archived: false, limit: 10 }
+    );
+
+    expect(page.sessions.map((session) => session.id)).toEqual([
+      "pinned",
+      "newest",
+    ]);
+    expect(page.cursor).toBeNull();
+  });
+
+  it("walks the whole list one page at a time without repeating a row", () => {
+    const sessions = Array.from({ length: 5 }, (_, index) =>
+      summary({
+        id: `s-${index}`,
+        lastMessageAt: `2026-08-11T1${index}:00:00.000Z`,
+      })
+    );
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: ReturnType<typeof selectSessionPage> = selectSessionPage(
+        sessions,
+        { archived: false, limit: 2, cursor }
+      );
+      seen.push(...page.sessions.map((session) => session.id));
+      cursor = page.cursor;
+    } while (cursor);
+
+    expect(seen).toEqual(["s-4", "s-3", "s-2", "s-1", "s-0"]);
+  });
+
+  it("refuses a cursor taken from a differently filtered list", () => {
+    const scope = { archived: false, query: "" };
+    expect(decodeSessionCursor(encodeSessionCursor(scope, "s-1"), scope)).toBe(
+      "s-1"
+    );
+    expect(
+      decodeSessionCursor(encodeSessionCursor(scope, "s-1"), {
+        archived: true,
+        query: "",
+      })
+    ).toBeNull();
+    expect(
+      decodeSessionCursor(encodeSessionCursor(scope, "s-1"), {
+        archived: false,
+        query: "psalm",
+      })
+    ).toBeNull();
+    expect(decodeSessionCursor("not-a-cursor", scope)).toBeNull();
+  });
+
+  it("restarts at the top when the cursor names a row that has left the list", () => {
+    const archivedCursor = encodeSessionCursor(
+      { archived: false, query: "" },
+      "s-gone"
+    );
+
+    const page = selectSessionPage([summary({ id: "s-here" })], {
+      archived: false,
+      limit: 10,
+      cursor: archivedCursor,
+    });
+
+    expect(page.sessions.map((session) => session.id)).toEqual(["s-here"]);
+  });
+
+  it("keeps the two lists apart, cursor and all", () => {
+    const sessions = [
+      summary({ id: "live" }),
+      summary({ id: "filed", archived: true }),
+    ];
+
+    expect(
+      selectSessionPage(sessions, { archived: true, limit: 10 }).sessions.map(
+        (session) => session.id
+      )
+    ).toEqual(["filed"]);
   });
 });
 

@@ -33,7 +33,7 @@ import {
 } from "node:http";
 import type { Config } from "./config.js";
 import { createAccumulator, toMetrics, type GlooClient } from "./gloo.js";
-import { rollupByModel } from "./ledger.js";
+import { rollupByModel, SESSION_QUERY_MAX_CHARS } from "./ledger.js";
 import { createRegistryLoader } from "./pricing.js";
 import {
   chatRequestSchema,
@@ -73,10 +73,16 @@ const LEDGER_PAGE_SIZE = 200;
 const MAX_BODY_BYTES = 256 * 1024;
 
 /**
- * Conversations expire after twelve hours, so a visitor's history is short by
- * construction; this only bounds the pathological case.
+ * One sidebar page. Small enough that the first page is what fits on screen
+ * and "Load more" is a real affordance rather than decoration.
  */
-const SESSION_PAGE_SIZE = 50;
+const SESSION_PAGE_SIZE = 25;
+
+/**
+ * A cursor this process issued is well under this; the bound is only so an
+ * arbitrarily long query string cannot be handed to the decoder.
+ */
+const CURSOR_MAX_CHARS = 256;
 
 /**
  * The ALB's own idle timeout is 60s and it, not the target, is meant to
@@ -500,6 +506,13 @@ async function handleSessionPatch(
  *
  * `?archived=1` returns the archived ones instead of hiding them, which is
  * what makes archiving recoverable rather than a delete with a longer name.
+ *
+ * `?q=` searches titles and opening questions, and `?cursor=` resumes after
+ * the last conversation of the previous page. The search runs here rather
+ * than in the browser because this route already reads the visitor's whole
+ * partition to order it, so matching costs nothing extra and covers the
+ * conversations the client has not paged in yet; filtering in the browser
+ * would search only what happened to be loaded.
  */
 async function handleSessions(
   response: ServerResponse,
@@ -507,18 +520,14 @@ async function handleSessions(
   store: Store,
   visitor: VisitorContext
 ): Promise<void> {
-  respond(
-    response,
-    200,
-    {
-      sessions: await store.listSessions(
-        visitor.visitorId,
-        SESSION_PAGE_SIZE,
-        url.searchParams.get("archived") === "1"
-      ),
-    },
-    visitorHeaders(visitor)
-  );
+  const cursor = url.searchParams.get("cursor");
+  const page = await store.listSessions(visitor.visitorId, {
+    limit: SESSION_PAGE_SIZE,
+    archived: url.searchParams.get("archived") === "1",
+    query: (url.searchParams.get("q") ?? "").slice(0, SESSION_QUERY_MAX_CHARS),
+    cursor: cursor && cursor.length <= CURSOR_MAX_CHARS ? cursor : null,
+  });
+  respond(response, 200, page, visitorHeaders(visitor));
 }
 
 async function route(

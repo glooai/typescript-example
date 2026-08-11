@@ -374,6 +374,171 @@ export function sortSessionsForHistory(
     .slice(0, limit);
 }
 
+/**
+ * The longest search a caller may send. Matching runs over two short stored
+ * strings, so anything past this is a caller mistake rather than a query.
+ */
+export const SESSION_QUERY_MAX_CHARS = 80;
+
+/** Lowercase and collapse whitespace: the form both sides of a match take. */
+function normalizeQuery(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * How well one conversation answers a search, 0 for not at all.
+ *
+ * The bands are the borrowed idea: an exact name beats a name that starts
+ * with the query, which beats a name that merely contains it, which beats a
+ * hit in the opening question. What is deliberately not borrowed is
+ * tokenising, stemming, and embedding similarity, all of which exist in the
+ * app this is modelled on because it searches whole transcripts. Here the
+ * only searchable text is a title of at most forty characters and a preview
+ * of at most a hundred and twenty, so a substring test finds everything a
+ * tokeniser would and ranks it with four comparisons.
+ */
+export function scoreSessionMatch(
+  session: SessionSummary,
+  query: string
+): number {
+  const needle = normalizeQuery(query);
+  if (!needle) {
+    return 0;
+  }
+  const title = normalizeQuery(session.title ?? "");
+  if (title === needle) {
+    return 4;
+  }
+  if (title.startsWith(needle)) {
+    return 3;
+  }
+  if (title.includes(needle)) {
+    return 2;
+  }
+  return normalizeQuery(session.preview).includes(needle) ? 1 : 0;
+}
+
+/**
+ * Browse order for a search result set: relevance first, and only then the
+ * pinned-and-recent order the unfiltered list uses. Pinning deliberately
+ * loses to a better match here, because a visitor who has typed a search has
+ * said what they are looking for, and a pinned conversation floating above
+ * the thing they named would read as the search being ignored.
+ */
+function rankSessionsForQuery(
+  sessions: SessionSummary[],
+  query: string
+): SessionSummary[] {
+  return sessions
+    .map((session) => ({ session, score: scoreSessionMatch(session, query) }))
+    .filter((scored) => scored.score > 0)
+    .sort((a, b) => {
+      if (a.score !== b.score) {
+        return b.score - a.score;
+      }
+      if (a.session.pinned !== b.session.pinned) {
+        return a.session.pinned ? -1 : 1;
+      }
+      return b.session.lastMessageAt.localeCompare(a.session.lastMessageAt);
+    })
+    .map((scored) => scored.session);
+}
+
+/** What a cursor is only valid within: the same list, filtered the same way. */
+export type SessionScope = { archived: boolean; query: string };
+
+function scopeFingerprint(scope: SessionScope): string {
+  return `${scope.archived ? "a" : "r"}:${normalizeQuery(scope.query)}`;
+}
+
+/**
+ * An opaque "resume after this conversation" token.
+ *
+ * It is deliberately not DynamoDB's `LastEvaluatedKey`. The sort key of a
+ * summary row is the conversation id, so the stored order is arbitrary, while
+ * the order this list is read in is pinned-then-recent (or relevance under a
+ * search). Paging on the storage order would hand out pages whose contents
+ * are correct and whose order is meaningless. The partition is one visitor's
+ * conversations inside a twelve-hour window, so it is read whole either way
+ * and the only honest cursor is a position in the order actually rendered.
+ *
+ * The filter is baked into the token because a cursor taken from the recent
+ * list says nothing about where to resume the archived one; a token from a
+ * different filter is refused and the caller gets the first page instead of
+ * a silently wrong slice.
+ */
+export function encodeSessionCursor(
+  scope: SessionScope,
+  sessionId: string
+): string {
+  return Buffer.from(`${scopeFingerprint(scope)} ${sessionId}`, "utf8").toString(
+    "base64url"
+  );
+}
+
+export function decodeSessionCursor(
+  cursor: string,
+  scope: SessionScope
+): string | null {
+  const decoded = Buffer.from(cursor, "base64url").toString("utf8");
+  const separator = decoded.indexOf(" ");
+  if (separator === -1) {
+    return null;
+  }
+  if (decoded.slice(0, separator) !== scopeFingerprint(scope)) {
+    return null;
+  }
+  const sessionId = decoded.slice(separator + 1);
+  return sessionId.length > 0 ? sessionId : null;
+}
+
+export type SessionPage = {
+  sessions: SessionSummary[];
+  cursor: string | null;
+};
+
+/**
+ * One page of a visitor's history: filtered to one of the two lists, ordered,
+ * then sliced at the cursor. A cursor naming a conversation that is no longer
+ * in the list (archived, renamed out of a search, expired) restarts at the
+ * top, which is the same answer a fresh open would give.
+ */
+export function selectSessionPage(
+  sessions: SessionSummary[],
+  options: {
+    archived: boolean;
+    query?: string;
+    limit: number;
+    cursor?: string | null;
+  }
+): SessionPage {
+  const scope: SessionScope = {
+    archived: options.archived,
+    query: options.query ?? "",
+  };
+  const visible = sessions.filter(
+    (session) => session.archived === options.archived
+  );
+  const ordered = normalizeQuery(scope.query)
+    ? rankSessionsForQuery(visible, scope.query)
+    : sortSessionsForHistory(visible, visible.length);
+
+  const after = options.cursor
+    ? decodeSessionCursor(options.cursor, scope)
+    : null;
+  const resumeAt = after
+    ? ordered.findIndex((session) => session.id === after) + 1
+    : 0;
+
+  const page = ordered.slice(resumeAt, resumeAt + options.limit);
+  const last = page[page.length - 1];
+  const more = resumeAt + page.length < ordered.length;
+  return {
+    sessions: page,
+    cursor: more && last ? encodeSessionCursor(scope, last.id) : null,
+  };
+}
+
 /** Newest first, capped. Callers merge partitions before calling this. */
 export function sortRowsNewestFirst(
   rows: LedgerRow[],

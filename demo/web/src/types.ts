@@ -60,6 +60,16 @@ export type SessionSummary = {
   archived: boolean;
 };
 
+/**
+ * One page of `GET /api/sessions`. The cursor is opaque here on purpose: the
+ * server owns what a page boundary means, and the sidebar only ever hands the
+ * last one it was given back.
+ */
+export type SessionsPage = {
+  sessions: SessionSummary[];
+  cursor: string | null;
+};
+
 /** `PATCH /api/session?id=<id>` body. Every field is optional. */
 export type SessionPatch = {
   pinned?: boolean;

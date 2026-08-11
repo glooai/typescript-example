@@ -99,8 +99,14 @@ export type SessionSummary = {
   archived: boolean;
 };
 
+/**
+ * One page of `GET /api/sessions`. `cursor` is opaque to the client and null
+ * when the page is the last one, so "is there more" is the presence of a
+ * cursor rather than a count the client has to reason about.
+ */
 export type SessionsResponse = {
   sessions: SessionSummary[];
+  cursor: string | null;
 };
 
 /** `PATCH /api/session?id=<id>` request body. Every field is optional. */
