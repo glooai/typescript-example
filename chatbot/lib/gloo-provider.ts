@@ -1,14 +1,13 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { getValidToken } from "./gloo-auth";
+import { getApiKey } from "./gloo-auth";
 
 export const gloo = createOpenAICompatible({
   name: "gloo",
   baseURL: "https://platform.ai.gloo.com/ai/v2",
-  // Dynamic Bearer token via custom fetch (OAuth2, not static API key)
   fetch: async (url, init) => {
-    const token = await getValidToken();
+    const apiKey = getApiKey();
     const headers = new Headers(init?.headers);
-    headers.set("Authorization", `Bearer ${token}`);
+    headers.set("Authorization", `Bearer ${apiKey}`);
 
     // Gloo V2 requires exactly one routing mechanism (auto_routing, model,
     // or model_family). The AI SDK always sends `model`, so strip it when
@@ -16,7 +15,7 @@ export const gloo = createOpenAICompatible({
     let body = init?.body;
     if (typeof body === "string") {
       try {
-        const parsed = JSON.parse(body);
+        const parsed = JSON.parse(body) as Record<string, unknown>;
         if (parsed.auto_routing || parsed.model_family) {
           delete parsed.model;
           body = JSON.stringify(parsed);
