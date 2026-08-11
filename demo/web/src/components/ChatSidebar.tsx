@@ -67,7 +67,7 @@ function RowAction({
       onClick={onClick}
       aria-label={label}
       title={label}
-      className={`flex size-7 flex-none items-center justify-center rounded-md transition hover:bg-raised ${
+      className={`flex size-7 flex-none items-center justify-center rounded-md transition hover:bg-raised pointer-coarse:size-10 ${
         active ? "text-accent" : "text-muted hover:text-body"
       }`}
     >
@@ -88,11 +88,17 @@ export function ChatSidebar({
   currentId,
   onOpen,
   onNewChat,
+  onClose,
+  open,
   refreshToken,
 }: {
   currentId: string;
   onOpen: (sessionId: string) => void;
   onNewChat: () => void;
+  /** Dismiss the drawer. Only reachable below `md`, where one exists. */
+  onClose: () => void;
+  /** Whether the rail is on screen. Always true from `md` up, where it is inline. */
+  open: boolean;
   /** Bumped by the chat when a turn lands, so the list reflects it. */
   refreshToken: number;
 }) {
@@ -231,7 +237,7 @@ export function ChatSidebar({
                 }
               }}
               aria-label="Chat name"
-              className="min-w-0 flex-1 rounded-md border border-line-strong bg-surface px-2 py-1 text-sm outline-none transition focus:border-accent"
+              className="min-w-0 flex-1 rounded-md border border-line-strong bg-surface px-2 py-1 text-base outline-none transition focus:border-accent sm:text-sm"
             />
             <RowAction
               label="Save name"
@@ -277,10 +283,11 @@ export function ChatSidebar({
             {/* Over the row rather than beside it: the actions would otherwise
                 hold a third of the width open on every row to be there for the
                 one row being pointed at. Keyboard focus reveals them as
-                pointing does, and a coarse pointer has no hover to reveal them
-                with at all, so there they simply stay visible. */}
+                pointing does. A coarse pointer has no hover at all, so there
+                they are permanent, and permanent means they take their own
+                space rather than covering the title they belong to. */}
             <div
-              className={`absolute right-1 flex items-center rounded-md opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 ${
+              className={`absolute right-1 flex items-center rounded-md opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:static pointer-coarse:opacity-100 ${
                 entry.active ? "bg-raised" : "bg-inset"
               }`}
             >
@@ -313,17 +320,33 @@ export function ChatSidebar({
 
   return (
     <aside
+      id="chat-history"
       aria-label="Chat history"
-      className="flex w-72 flex-none flex-col gap-3 rounded-2xl border border-line bg-surface p-3"
+      // Off screen is not the same as absent: without this the drawer's search
+      // box and every history row stay in the tab order behind the transcript.
+      inert={!open}
+      className={`fixed inset-y-0 left-0 z-40 flex w-72 max-w-[85vw] flex-none flex-col gap-3 border-r border-line bg-surface p-3 transition-transform duration-200 md:static md:max-w-none md:translate-x-0 md:rounded-2xl md:border md:transition-none ${
+        open ? "translate-x-0" : "-translate-x-full"
+      }`}
     >
-      <button
-        type="button"
-        onClick={onNewChat}
-        className="flex items-center justify-center gap-1.5 rounded-xl border border-line bg-inset px-3 py-2 text-sm text-soft transition hover:border-accent hover:text-body"
-      >
-        <Icon path={ICON_NEW} className="size-4" />
-        New chat
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onNewChat}
+          className="flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-line bg-inset px-3 py-2 text-sm text-soft transition hover:border-accent hover:text-body md:min-h-0"
+        >
+          <Icon path={ICON_NEW} className="size-4" />
+          New chat
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close chat history"
+          className="flex size-11 flex-none items-center justify-center rounded-xl border border-line text-muted transition hover:border-accent hover:text-body md:hidden"
+        >
+          <Icon path={ICON_CANCEL} className="size-4" />
+        </button>
+      </div>
 
       <div className="relative">
         <Icon
@@ -336,7 +359,7 @@ export function ChatSidebar({
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search chats"
           aria-label="Search chats"
-          className="w-full rounded-xl border border-line bg-inset py-1.5 pr-2.5 pl-8 text-sm outline-none transition placeholder:text-muted focus:border-accent"
+          className="w-full rounded-xl border border-line bg-inset py-2 pr-2.5 pl-8 text-base outline-none transition placeholder:text-muted focus:border-accent sm:py-1.5 sm:text-sm"
         />
       </div>
 
@@ -350,7 +373,7 @@ export function ChatSidebar({
           setShowArchived((archived) => !archived);
         }}
         aria-pressed={showArchived}
-        className="self-start px-1 text-xs text-muted underline underline-offset-2 transition hover:text-body"
+        className="inline-flex min-h-11 items-center self-start px-1 text-xs text-muted underline underline-offset-2 transition hover:text-body md:min-h-0"
       >
         {showArchived ? "Back to recent" : "Show archived"}
       </button>
@@ -396,7 +419,7 @@ export function ChatSidebar({
             type="button"
             onClick={() => void loadMore()}
             disabled={loadingMore}
-            className="mt-1 w-full rounded-lg px-2.5 py-2 text-xs text-muted transition hover:bg-inset hover:text-body disabled:opacity-50"
+            className="mt-1 w-full rounded-lg px-2.5 py-2 text-xs text-muted transition hover:bg-inset hover:text-body disabled:opacity-50 pointer-coarse:min-h-11"
           >
             {loadingMore ? "Loading" : "Load more"}
           </button>

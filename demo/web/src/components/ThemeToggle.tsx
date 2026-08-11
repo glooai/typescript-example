@@ -70,7 +70,7 @@ export function ThemeToggle() {
       }}
       aria-label={`Switch to ${next} mode`}
       title={`Switch to ${next} mode`}
-      className="flex size-9 flex-none items-center justify-center rounded-xl border border-line bg-surface text-muted transition hover:border-accent hover:text-body"
+      className="flex size-11 flex-none items-center justify-center rounded-xl border border-line bg-surface text-muted transition hover:border-accent hover:text-body sm:size-9"
     >
       {next === "light" ? <SunIcon /> : <MoonIcon />}
     </button>
