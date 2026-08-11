@@ -11,6 +11,7 @@ import type {
   LedgerRow,
   ModelSummary,
   RoutingSelection,
+  SessionSummary,
 } from "./types";
 
 const SESSION_STORAGE_KEY = "gloo-demo-session-id";
@@ -25,9 +26,18 @@ export function getSessionId(): string {
   if (existing) {
     return existing;
   }
-  const created = `s-${crypto.randomUUID().replace(/-/g, "")}`;
-  window.localStorage.setItem(SESSION_STORAGE_KEY, created);
-  return created;
+  return rememberSessionId(`s-${crypto.randomUUID().replace(/-/g, "")}`);
+}
+
+/** Which conversation a refresh will land back in. */
+export function rememberSessionId(sessionId: string): string {
+  window.localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+  return sessionId;
+}
+
+/** A fresh conversation. Nothing server side is created until a first turn. */
+export function startSession(): string {
+  return rememberSessionId(`s-${crypto.randomUUID().replace(/-/g, "")}`);
 }
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -65,6 +75,19 @@ export async function fetchSession(
   return body.messages.filter(
     (message) => message.role === "user" || message.role === "assistant"
   );
+}
+
+/**
+ * This browser's past conversations. The server answers from the anonymous
+ * visitor cookie, so a browser that refuses cookies gets an empty list rather
+ * than an error, and the caller renders that as "no history yet".
+ */
+export async function fetchSessions(
+  signal?: AbortSignal
+): Promise<SessionSummary[]> {
+  const response = await fetch("/api/sessions", { signal });
+  const body = await readJson<{ sessions: SessionSummary[] }>(response);
+  return body.sessions;
 }
 
 export async function runComparison(options: {

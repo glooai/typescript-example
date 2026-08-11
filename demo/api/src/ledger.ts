@@ -1,7 +1,7 @@
 /**
  * DynamoDB item shaping and read-side aggregation.
  *
- * Single table, two entity types, both keyed off `pk`/`sk` and both carrying
+ * Single table, three entity types, all keyed off `pk`/`sk` and all carrying
  * a TTL attribute so demo data expires on its own instead of needing a
  * cleanup job:
  *
@@ -15,6 +15,18 @@
  *      One row per chat message, so a demo conversation survives a page
  *      refresh without any server-side session infrastructure.
  *
+ *   3. Session index - `pk = VISITOR#<visitorId>`, `sk = SESSION#<sessionId>`.
+ *      One row per conversation a visitor has had, so the Chat view can list
+ *      past conversations instead of only resuming the one id `localStorage`
+ *      happens to hold. This is a written index rather than a secondary index
+ *      on the message rows: a GSI keyed on the visitor would project every
+ *      message row and force a dedupe per conversation on every read, where
+ *      one summary row per conversation keeps the read a single Query on a
+ *      known partition key, which is the rule the rest of this table follows.
+ *      The sort key is the conversation id and not its timestamp, so a
+ *      conversation that is written on every turn overwrites its own summary
+ *      instead of leaving a trail of stale rows behind it.
+ *
  * The ledger partition key is the UTC date, not a constant, so write
  * traffic rotates daily instead of hammering one partition forever. Reads
  * query every partition still inside the TTL window and merge, so the
@@ -25,6 +37,7 @@ import type {
   ChatMessage,
   LedgerModelRollup,
   LedgerRow,
+  SessionSummary,
 } from "./types.js";
 import type { VisitorTrace } from "./visitor.js";
 
@@ -42,6 +55,19 @@ export type LedgerItem = {
   timestamp: string;
 } & CallMetrics &
   Partial<VisitorTrace>;
+
+/** A history entry is a label in a list, not a second copy of the transcript. */
+const PREVIEW_MAX_LENGTH = 120;
+
+export type SessionIndexItem = {
+  pk: string;
+  sk: string;
+  entity: "session_index";
+  expires_at: number;
+  session_id: string;
+  last_message_at: string;
+  preview: string;
+};
 
 export type SessionItem = {
   pk: string;
@@ -140,6 +166,95 @@ export function toSessionItems(
     content: message.content,
     ...(trace ? { ...visitor, visitor_seen_at: at.toISOString() } : {}),
   }));
+}
+
+export function visitorKey(visitorId: string): string {
+  return `VISITOR#${visitorId}`;
+}
+
+/**
+ * The label a conversation gets in the history list: its opening question,
+ * whitespace collapsed so a pasted multi-line prompt stays one line, and
+ * truncated. An empty string is a valid result and the client decides how an
+ * unlabelled conversation reads.
+ */
+export function sessionPreview(messages: ChatMessage[]): string {
+  const first = messages.find((message) => message.role === "user");
+  const text = (first?.content ?? "").replace(/\s+/g, " ").trim();
+  return text.length > PREVIEW_MAX_LENGTH
+    ? `${text.slice(0, PREVIEW_MAX_LENGTH).trimEnd()}...`
+    : text;
+}
+
+/**
+ * The summary row for one conversation. It carries the same TTL as the
+ * message rows it describes, so history never outlives the transcripts it
+ * would offer to open.
+ */
+export function toSessionIndexItem(
+  visitorId: string,
+  sessionId: string,
+  messages: ChatMessage[],
+  at: Date
+): SessionIndexItem {
+  return {
+    pk: visitorKey(visitorId),
+    sk: sessionKey(sessionId),
+    entity: "session_index",
+    expires_at: Math.floor(at.getTime() / 1000) + SESSION_TTL_SECONDS,
+    session_id: sessionId,
+    last_message_at: at.toISOString(),
+    preview: sessionPreview(messages),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * Narrow a stored row into a summary. DynamoDB returns an untyped document,
+ * and this is the one read whose rows are rendered as a clickable list, so a
+ * row that is not a well-formed summary is dropped rather than asserted into
+ * shape and surfaced as a history entry that opens nothing. A missing preview
+ * is not malformed: a conversation whose first turn carried no text is
+ * legitimately unlabelled.
+ */
+export function toSessionSummary(item: unknown): SessionSummary | null {
+  if (!isRecord(item)) {
+    return null;
+  }
+  const { session_id: id, last_message_at: lastMessageAt, preview } = item;
+  if (typeof id !== "string" || id.length === 0) {
+    return null;
+  }
+  if (
+    typeof lastMessageAt !== "string" ||
+    Number.isNaN(Date.parse(lastMessageAt))
+  ) {
+    return null;
+  }
+  return {
+    id,
+    lastMessageAt,
+    preview: typeof preview === "string" ? preview : "",
+  };
+}
+
+/**
+ * Newest first, capped. The sort key is the conversation id, so recency is an
+ * attribute rather than the stored order; a visitor's partition holds one row
+ * per conversation inside a twelve-hour window, so sorting it in the process
+ * is cheaper than the second write an ordered sort key would need on every
+ * turn to avoid leaving a stale row behind.
+ */
+export function sortSessionsNewestFirst(
+  sessions: SessionSummary[],
+  limit: number
+): SessionSummary[] {
+  return [...sessions]
+    .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt))
+    .slice(0, limit);
 }
 
 /** Newest first, capped. Callers merge partitions before calling this. */

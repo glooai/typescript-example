@@ -7,7 +7,7 @@
 # there is also nothing relational about two independent key-addressed entity
 # types.
 #
-# Two entity types share the table, both keyed on pk/sk (see
+# Three entity types share the table, all keyed on pk/sk (see
 # demo/api/src/ledger.ts for the full key design):
 #
 #   LEDGER#<date>   one row per proxied Gloo call. Justification: the demo's
@@ -20,6 +20,13 @@
 #                   conversation surviving a page refresh is the difference
 #                   between a toy and something a viewer can walk away from
 #                   and come back to.
+#
+#   VISITOR#<id>    one summary row per conversation that visitor has had,
+#                   so the Chat view can list and reopen past conversations.
+#                   Written with the transcript rather than indexed off it: a
+#                   GSI on the visitor would project every message row and
+#                   bill for a second copy of every transcript to answer a
+#                   question one summary row per conversation already answers.
 #
 # No secondary indexes: every read is a Query on a known partition key.
 

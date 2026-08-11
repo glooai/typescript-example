@@ -12,15 +12,25 @@ import {
   PutCommand,
   QueryCommand,
 } from "@aws-sdk/lib-dynamodb";
-import type { CallMetrics, ChatMessage, LedgerRow } from "./types.js";
+import type {
+  CallMetrics,
+  ChatMessage,
+  LedgerRow,
+  SessionSummary,
+} from "./types.js";
 import {
   recentLedgerPartitions,
   sessionKey,
   sortRowsNewestFirst,
+  sortSessionsNewestFirst,
   toLedgerItem,
   toLedgerRow,
+  toSessionIndexItem,
   toSessionItems,
+  toSessionSummary,
+  visitorKey,
   type LedgerItem,
+  type SessionIndexItem,
 } from "./ledger.js";
 import type { VisitorTrace } from "./visitor.js";
 
@@ -68,7 +78,17 @@ export function createStore(
       trace?: VisitorTrace,
       at = new Date()
     ): Promise<void> {
-      const items = toSessionItems(sessionId, messages, at, trace);
+      const items: Array<
+        ReturnType<typeof toSessionItems>[number] | SessionIndexItem
+      > = [...toSessionItems(sessionId, messages, at, trace)];
+      // The summary row is written with the transcript rather than on its own
+      // schedule, so a conversation can never be listed in history without the
+      // messages that list entry promises to open.
+      if (trace?.visitor_id) {
+        items.push(
+          toSessionIndexItem(trace.visitor_id, sessionId, messages, at)
+        );
+      }
       for (const batch of chunk(items, BATCH_LIMIT)) {
         await client.send(
           new BatchWriteCommand({
@@ -92,6 +112,29 @@ export function createStore(
         role: item.role as ChatMessage["role"],
         content: String(item.content ?? ""),
       }));
+    },
+
+    /**
+     * A visitor's past conversations, newest first. An unknown visitor is an
+     * empty list rather than an error: a browser that refuses the cookie is
+     * issued a new id on every request, so "no history" is the correct and
+     * expected answer for it.
+     */
+    async listSessions(
+      visitorId: string,
+      limit: number
+    ): Promise<SessionSummary[]> {
+      const result = await client.send(
+        new QueryCommand({
+          TableName: tableName,
+          KeyConditionExpression: "pk = :pk",
+          ExpressionAttributeValues: { ":pk": visitorKey(visitorId) },
+        })
+      );
+      const sessions = (result.Items ?? [])
+        .map(toSessionSummary)
+        .filter((session): session is SessionSummary => session !== null);
+      return sortSessionsNewestFirst(sessions, limit);
     },
 
     async recentCalls(limit: number, now = new Date()): Promise<LedgerRow[]> {

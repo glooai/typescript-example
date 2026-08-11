@@ -1,16 +1,25 @@
 import { useEffect, useRef, useState } from "react";
-import { getSessionId, fetchSession, streamChat } from "../api";
+import {
+  fetchSession,
+  fetchSessions,
+  getSessionId,
+  rememberSessionId,
+  startSession,
+  streamChat,
+} from "../api";
 import {
   formatCost,
   formatLatency,
   formatTokens,
   shortModelName,
 } from "../format";
+import { historyEntries } from "../sessions";
 import type {
   CallMetrics,
   ChatMessage,
   ModelSummary,
   RoutingSelection,
+  SessionSummary,
 } from "../types";
 import { Markdown } from "./Markdown";
 import { RoutingPicker } from "./RoutingPicker";
@@ -57,7 +66,10 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
   const [error, setError] = useState<string | null>(null);
   // Lazy initialiser: getSessionId can write to localStorage, which must
   // not happen on every render.
-  const [sessionId] = useState(getSessionId);
+  const [sessionId, setSessionId] = useState(getSessionId);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -79,12 +91,58 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
     return () => controller.abort();
   }, [sessionId]);
 
+  // Fetched when the list is opened rather than on mount, so a visitor who
+  // never opens history costs no extra request, and every open shows the
+  // conversation they have just been adding turns to.
+  useEffect(() => {
+    if (!historyOpen) {
+      return;
+    }
+    const controller = new AbortController();
+    setHistoryLoading(true);
+    fetchSessions(controller.signal)
+      .then(setSessions)
+      .catch(() => {
+        // No cookie, or an unreachable list: an empty history, not an error.
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setHistoryLoading(false);
+        }
+      });
+    return () => controller.abort();
+  }, [historyOpen]);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
     });
   }, [turns]);
+
+  /**
+   * Move to another conversation. The transcript is cleared here rather than
+   * left in place until the fetch lands, so the previous conversation is
+   * never briefly shown under the new one's id.
+   */
+  function openSession(nextId: string) {
+    setHistoryOpen(false);
+    if (nextId === sessionId) {
+      return;
+    }
+    abortRef.current?.abort();
+    setError(null);
+    setTurns([]);
+    setSessionId(rememberSessionId(nextId));
+  }
+
+  function newChat() {
+    setHistoryOpen(false);
+    abortRef.current?.abort();
+    setError(null);
+    setTurns([]);
+    setSessionId(startSession());
+  }
 
   async function send(text: string) {
     const prompt = text.trim();
@@ -139,11 +197,73 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
   const lastTurn = turns[turns.length - 1];
   const streamingEmpty =
     busy && lastTurn?.role === "assistant" && lastTurn.content.length === 0;
+  const entries = historyEntries(sessions, sessionId);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <Panel className="px-4 py-3">
-        <RoutingPicker value={routing} onChange={setRouting} models={models} />
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+          <RoutingPicker
+            value={routing}
+            onChange={setRouting}
+            models={models}
+          />
+
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setHistoryOpen((open) => !open)}
+              aria-expanded={historyOpen}
+              aria-controls="chat-history"
+              className={`rounded-full border px-3.5 py-1.5 text-xs transition ${
+                historyOpen
+                  ? "border-accent text-body"
+                  : "border-line bg-inset text-soft hover:border-accent hover:text-body"
+              }`}
+            >
+              History
+            </button>
+            <button
+              type="button"
+              onClick={newChat}
+              className="rounded-full border border-line bg-inset px-3.5 py-1.5 text-xs text-soft transition hover:border-accent hover:text-body"
+            >
+              New chat
+            </button>
+          </div>
+        </div>
+
+        {historyOpen && (
+          <div id="chat-history" className="mt-3 border-t border-line pt-3">
+            {entries.length === 0 ? (
+              <p className="px-1 text-xs text-muted">
+                {historyLoading ? "Loading your chats" : "No past chats yet."}
+              </p>
+            ) : (
+              <ul className="max-h-56 space-y-0.5 overflow-y-auto">
+                {entries.map((entry) => (
+                  <li key={entry.id}>
+                    <button
+                      type="button"
+                      onClick={() => openSession(entry.id)}
+                      aria-current={entry.active ? "true" : undefined}
+                      className={`flex w-full items-baseline gap-3 rounded-lg px-2.5 py-2 text-left transition hover:bg-inset ${
+                        entry.active ? "bg-inset" : ""
+                      }`}
+                    >
+                      <span className="min-w-0 flex-1 truncate text-sm text-soft">
+                        {entry.title}
+                      </span>
+                      <span className="flex-none font-mono text-[0.625rem] text-muted">
+                        {entry.when}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </Panel>
 
       {error && <ErrorNote message={error} />}
