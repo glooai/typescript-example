@@ -17,8 +17,8 @@
  *
  * The ledger partition key is the UTC date, not a constant, so write
  * traffic rotates daily instead of hammering one partition forever. Reads
- * query today and yesterday and merge, which is enough for a "recent
- * activity" feed.
+ * query every partition still inside the TTL window and merge, so the
+ * Observed view can plot a trend rather than only the last few minutes.
  */
 import type {
   CallMetrics,
@@ -29,7 +29,8 @@ import type {
 import type { VisitorTrace } from "./visitor.js";
 
 /** Ledger rows outlive a demo session but not a week. */
-export const LEDGER_TTL_SECONDS = 7 * 24 * 60 * 60;
+export const LEDGER_DAYS = 7;
+export const LEDGER_TTL_SECONDS = LEDGER_DAYS * 24 * 60 * 60;
 /** Conversations only need to survive a refresh, not a day. */
 export const SESSION_TTL_SECONDS = 12 * 60 * 60;
 
@@ -60,12 +61,19 @@ export function ledgerPartition(at: Date): string {
 }
 
 /**
- * The partitions a "recent activity" read must cover. Two days is enough
- * that the feed is never empty just because the clock rolled past midnight.
+ * The partitions a read must cover, newest day first. The default is the
+ * whole TTL window: those rows are already being stored and paid for, and a
+ * two-day read threw away most of what a latency trend has to plot. Each
+ * extra day is one more Query against a known partition key, all issued
+ * concurrently, so the cost of the wider window is one round trip either way.
  */
-export function recentLedgerPartitions(now: Date): string[] {
-  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  return [ledgerPartition(now), ledgerPartition(yesterday)];
+export function recentLedgerPartitions(
+  now: Date,
+  days = LEDGER_DAYS
+): string[] {
+  return Array.from({ length: Math.max(1, days) }, (_, back) =>
+    ledgerPartition(new Date(now.getTime() - back * 24 * 60 * 60 * 1000))
+  );
 }
 
 export function toLedgerItem(

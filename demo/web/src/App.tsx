@@ -1,10 +1,21 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { fetchModels } from "./api";
 import { ChatPanel } from "./components/ChatPanel";
 import { ComparePanel } from "./components/ComparePanel";
-import { ObservedPanel } from "./components/ObservedPanel";
 import { ThemeToggle } from "./components/ThemeToggle";
 import type { ModelSummary } from "./types";
+
+/*
+ * Observed is the only view that draws charts, and the charting library is
+ * most of the bundle. Splitting it out keeps that weight off the first load
+ * of Chat, which is the view every visitor lands on; the chunk is fetched
+ * the first time someone opens the tab.
+ */
+const ObservedPanel = lazy(() =>
+  import("./components/ObservedPanel").then((module) => ({
+    default: module.ObservedPanel,
+  }))
+);
 
 const TABS = [
   { id: "chat", label: "Chat" },
@@ -69,7 +80,15 @@ export function App() {
       <main className="flex min-h-0 flex-1 flex-col">
         {tab === "chat" && <ChatPanel models={models} />}
         {tab === "compare" && <ComparePanel models={models} />}
-        {tab === "observed" && <ObservedPanel />}
+        {tab === "observed" && (
+          <Suspense
+            fallback={
+              <p className="px-1 text-sm text-muted">Loading the charts</p>
+            }
+          >
+            <ObservedPanel />
+          </Suspense>
+        )}
       </main>
     </div>
   );
