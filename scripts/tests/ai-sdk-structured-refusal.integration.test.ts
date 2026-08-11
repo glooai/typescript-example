@@ -34,19 +34,18 @@
  * a failure.
  *
  * Behavior:
- *   - Skips when GLOO_CLIENT_ID / GLOO_CLIENT_SECRET are unset or
- *     placeholder (`test-*` from CI). Same gate as
- *     completions-v2-moderation.integration.test.ts.
+ *   - Skips when GLOO_AI_API_KEY is unset or placeholder (`test-*` from
+ *     CI). Same gate as completions-v2-moderation.integration.test.ts.
  *   - Logs a structured diagnostics record so the PR validation comment
  *     can paste it verbatim.
  */
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import { config as loadEnv } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { generateObject, NoObjectGeneratedError, APICallError } from "ai";
 import { z } from "zod";
-import { createGlooProvider, resetGlooTokenCache } from "../src/gloo-ai-sdk.js";
+import { createGlooProvider } from "../src/gloo-ai-sdk.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: resolve(__dirname, "../../.env.local") });
@@ -56,10 +55,7 @@ function isPlaceholder(value: string | undefined): boolean {
 }
 
 function credsAvailable(): boolean {
-  const id = process.env.GLOO_CLIENT_ID ?? process.env.GLOO_AI_CLIENT_ID;
-  const secret =
-    process.env.GLOO_CLIENT_SECRET ?? process.env.GLOO_AI_CLIENT_SECRET;
-  return !isPlaceholder(id) && !isPlaceholder(secret);
+  return !isPlaceholder(process.env.GLOO_AI_API_KEY);
 }
 
 // Pinned to the Gloo V2 alias documented in the supported-models guide.
@@ -126,10 +122,6 @@ type ProbeOutcome =
 describe.skipIf(!credsAvailable())(
   "Vercel AI SDK + Gloo AI — structured-output safety-refusal probe (integration)",
   () => {
-    beforeAll(() => {
-      resetGlooTokenCache();
-    });
-
     it(
       "captures the SDK failure mode for a refusal-eliciting structured request",
       async () => {

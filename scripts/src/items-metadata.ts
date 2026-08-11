@@ -3,7 +3,7 @@ import { createWriteStream, WriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadCredentials, getAccessToken } from "./auth.js";
+import { loadApiKey } from "./auth.js";
 import { getItems, loadPublisherId } from "./items.js";
 
 const ITEM_METADATA_BASE_URL = "https://platform.ai.gloo.com/engine/v2/items";
@@ -182,14 +182,8 @@ export async function streamMetadataToFile(
 }
 
 export async function runItemsMetadataExample(): Promise<void> {
-  const credentials = loadCredentials();
+  const apiKey = loadApiKey();
   const publisherId = loadPublisherId();
-  const tokenResponse = await getAccessToken(credentials);
-  const accessToken = tokenResponse.access_token;
-
-  if (!accessToken) {
-    throw new Error("Access token missing from token response.");
-  }
 
   console.log(`Fetching items for publisher "${publisherId}"...`);
 
@@ -203,7 +197,7 @@ export async function runItemsMetadataExample(): Promise<void> {
 
   console.log("Fetching metadata...");
 
-  const generator = fetchAllMetadata(accessToken, publisherId);
+  const generator = fetchAllMetadata(apiKey, publisherId);
   const count = await streamMetadataToFile(generator, outputPath);
 
   console.log(`\nSaved ${count} metadata records to ${outputPath}`);

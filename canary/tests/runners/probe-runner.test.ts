@@ -17,7 +17,7 @@ const NOW = new Date("2026-04-20T18:00:00Z");
 
 const CONFIG: CanaryConfig = {
   mode: "probe",
-  gloo: { clientId: "id", clientSecret: "s" },
+  gloo: { apiKey: "key" },
   slack: { botToken: "xoxb", channelId: "C" },
   storage: { bucket: "b" },
   execution: { runId: "run-abc", startedAt: NOW.toISOString() },

@@ -6,8 +6,7 @@ on:
       - main
 
 env:
-  GLOO_AI_CLIENT_ID: test-gloo-ai-client-id
-  GLOO_AI_CLIENT_SECRET: test-gloo-ai-client-secret
+  GLOO_AI_API_KEY: test-gloo-ai-api-key
   NODE_VERSION: "20"
 
 jobs:

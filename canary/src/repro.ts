@@ -22,14 +22,13 @@
  *                       "casual usage" that often can't reproduce a budget bug.
  *   --list              Print every available signature and exit (no calls).
  *
- * Credentials come from env (`GLOO_AI_CLIENT_ID` / `GLOO_AI_CLIENT_SECRET`),
- * same as the probe runner. Never commit them; source them at call time.
+ * Credentials come from env (`GLOO_AI_API_KEY`), same as the probe runner.
+ * Never commit them; source them at call time.
  *
  * This module makes real, billed inference calls. Keep `--repeat` small.
  */
 
 import { config as loadEnv } from "dotenv";
-import { getAccessToken } from "@glooai/scripts";
 import { buildV2Fixtures } from "./fixtures/index.js";
 
 // Match the probe runner: hydrate creds from .env.local for local runs.
@@ -172,22 +171,13 @@ export async function main(argv: string[]): Promise<void> {
     );
   }
 
-  const clientId = process.env.GLOO_AI_CLIENT_ID;
-  const clientSecret = process.env.GLOO_AI_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
-    throw new Error(
-      "Missing GLOO_AI_CLIENT_ID / GLOO_AI_CLIENT_SECRET in env."
-    );
-  }
-
-  const tokenResponse = await getAccessToken({ clientId, clientSecret });
-  const accessToken = tokenResponse.access_token;
-  if (!accessToken) {
-    throw new Error("Access token missing from Gloo token response.");
+  const apiKey = process.env.GLOO_AI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing GLOO_AI_API_KEY in env.");
   }
 
   const ctx: ProbeContext = {
-    accessToken,
+    accessToken: apiKey,
     runId: `repro-${new Date().toISOString().replace(/[:.]/g, "-")}`,
     startedAt: new Date().toISOString(),
   };

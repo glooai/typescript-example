@@ -103,23 +103,20 @@ it("throws on non-200 response", async () => {
 });
 
 it("runs the search example with mocked network calls", async () => {
-  process.env.GLOO_CLIENT_ID = "id";
-  process.env.GLOO_CLIENT_SECRET = "secret";
+  process.env.GLOO_AI_API_KEY = "key123";
 
-  vi.spyOn(globalThis, "fetch")
-    .mockImplementationOnce(() => mockFetch({ access_token: "token123" }))
-    .mockImplementationOnce(() =>
-      mockFetch({
-        data: [
-          {
-            uuid: "result-1",
-            metadata: { certainty: 0.9, score: 0.8 },
-            properties: { title: "Leadership Tips" },
-          },
-        ],
-        intent: 1,
-      })
-    );
+  vi.spyOn(globalThis, "fetch").mockImplementationOnce(() =>
+    mockFetch({
+      data: [
+        {
+          uuid: "result-1",
+          metadata: { certainty: 0.9, score: 0.8 },
+          properties: { title: "Leadership Tips" },
+        },
+      ],
+      intent: 1,
+    })
+  );
 
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 

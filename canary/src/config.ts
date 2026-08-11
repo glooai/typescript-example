@@ -17,8 +17,7 @@ export type CanaryConfig = {
   mode: CanaryMode;
   // Gloo AI credentials (from Secret Manager via runtime env)
   gloo: {
-    clientId: string;
-    clientSecret: string;
+    apiKey: string;
   };
   // Slack credentials (from Secret Manager via runtime env)
   slack: {
@@ -74,8 +73,7 @@ export function loadConfig(now: Date = new Date()): CanaryConfig {
   return {
     mode,
     gloo: {
-      clientId: requireEnv("GLOO_AI_CLIENT_ID"),
-      clientSecret: requireEnv("GLOO_AI_CLIENT_SECRET"),
+      apiKey: requireEnv("GLOO_AI_API_KEY"),
     },
     slack: {
       botToken: requireEnv("ALERTS_SLACK_BOT_TOKEN"),

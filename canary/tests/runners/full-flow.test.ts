@@ -18,7 +18,7 @@ import type { SlackClient } from "../../src/sinks/slack.js";
 
 const CONFIG: CanaryConfig = {
   mode: "probe",
-  gloo: { clientId: "id", clientSecret: "s" },
+  gloo: { apiKey: "key" },
   slack: { botToken: "xoxb", channelId: "C" },
   storage: { bucket: "b" },
   execution: {
@@ -80,17 +80,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("runProbes fetches a token, executes each probe, archives, and alerts on RED", async () => {
-  // Mock the token fetch (getAccessToken hits the real OAuth endpoint).
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-    if (String(url).includes("/oauth2/token")) {
-      return new Response(JSON.stringify({ access_token: "abc" }), {
-        status: 200,
-      });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  });
-
+it("runProbes executes each probe, archives, and alerts on RED", async () => {
   const probe: Probe = {
     signature: "v1/test",
     label: "V1 · test",
@@ -131,24 +121,6 @@ it("runProbes fetches a token, executes each probe, archives, and alerts on RED"
   // Slack got a single top-level failure alert.
   expect(slack.posts).toHaveLength(1);
   expect(slack.posts[0].threadTs).toBeUndefined();
-});
-
-it("runProbes throws when the OAuth response has no access_token", async () => {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(JSON.stringify({ not_a_token: true }), { status: 200 })
-  );
-
-  const probe: Probe = {
-    signature: "v1/test",
-    label: "v1",
-    async run() {
-      throw new Error("should not be invoked");
-    },
-  };
-
-  await expect(
-    runProbes(CONFIG, { probes: [probe], gcs: fakeGcs(), slack: fakeSlack() })
-  ).rejects.toThrow(/Access token missing/);
 });
 
 it("loadWindow walks GCS prefixes and returns run artifacts sorted by startedAt", async () => {
@@ -423,15 +395,6 @@ it("runDigest posts one individualized threaded breakdown per red probe and roll
 });
 
 it("runProbes attaches registryDelta to the artifact when v2Models are provided and the GCS snapshot is missing (first-snapshot case)", async () => {
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-    if (String(url).includes("/oauth2/token")) {
-      return new Response(JSON.stringify({ access_token: "abc" }), {
-        status: 200,
-      });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  });
-
   const probe: Probe = {
     signature: "v2/noop",
     label: "V2 · noop",
@@ -481,15 +444,6 @@ it("runProbes attaches registryDelta to the artifact when v2Models are provided 
 });
 
 it("runProbes computes an add/remove delta against a previously persisted snapshot", async () => {
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-    if (String(url).includes("/oauth2/token")) {
-      return new Response(JSON.stringify({ access_token: "abc" }), {
-        status: 200,
-      });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  });
-
   const probe: Probe = {
     signature: "v2/noop",
     label: "V2 · noop",
@@ -542,9 +496,6 @@ it("runProbes computes an add/remove delta against a previously persisted snapsh
 });
 
 it("runProbes does not attach registryDelta when v2Models are not passed", async () => {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(JSON.stringify({ access_token: "abc" }), { status: 200 })
-  );
   const probe: Probe = {
     signature: "v1/x",
     label: "x",
@@ -803,15 +754,6 @@ it("runDigest renders a subdued baseline note on the first-snapshot case", async
 // confirm) false recoveries for open inference incidents.
 
 it("runProbes scopes failure state to activeFailuresPath and skips tier persist when asked", async () => {
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-    if (String(url).includes("/oauth2/token")) {
-      return new Response(JSON.stringify({ access_token: "abc" }), {
-        status: 200,
-      });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  });
-
   const probe: Probe = {
     signature: "ingestion/v2/e2e-text-file",
     label: "Ingestion E2E",
@@ -876,11 +818,6 @@ it("runProbes pings the heartbeat URL: bare on green, /fail on red, never on uns
   const heartbeatCalls: string[] = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
     const s = String(url);
-    if (s.includes("/oauth2/token")) {
-      return new Response(JSON.stringify({ access_token: "abc" }), {
-        status: 200,
-      });
-    }
     if (s.includes("heartbeat")) {
       heartbeatCalls.push(s);
       return new Response("", { status: 200 });

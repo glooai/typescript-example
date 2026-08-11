@@ -27,8 +27,7 @@ it("requires every runtime env var", () => {
 it("builds a config from all env vars when present", () => {
   process.env = {
     CANARY_MODE: "probe",
-    GLOO_AI_CLIENT_ID: "id",
-    GLOO_AI_CLIENT_SECRET: "secret",
+    GLOO_AI_API_KEY: "key",
     ALERTS_SLACK_BOT_TOKEN: "xoxb-fake",
     ALERTS_SLACK_CHANNEL_ID: "C123",
     CANARY_RESULTS_BUCKET: "bucket",
@@ -36,7 +35,7 @@ it("builds a config from all env vars when present", () => {
   };
   const cfg = loadConfig(new Date("2026-04-20T12:00:00Z"));
   expect(cfg.mode).toBe("probe");
-  expect(cfg.gloo).toEqual({ clientId: "id", clientSecret: "secret" });
+  expect(cfg.gloo).toEqual({ apiKey: "key" });
   expect(cfg.slack).toEqual({ botToken: "xoxb-fake", channelId: "C123" });
   expect(cfg.storage.bucket).toBe("bucket");
   expect(cfg.execution.runId).toBe("canary-probe-exec-abc");
@@ -45,8 +44,7 @@ it("builds a config from all env vars when present", () => {
 
 const INGESTION_ENV = {
   CANARY_MODE: "ingestion",
-  GLOO_AI_CLIENT_ID: "id",
-  GLOO_AI_CLIENT_SECRET: "secret",
+  GLOO_AI_API_KEY: "key",
   ALERTS_SLACK_BOT_TOKEN: "xoxb-fake",
   ALERTS_SLACK_CHANNEL_ID: "C123",
   CANARY_RESULTS_BUCKET: "bucket",
@@ -106,8 +104,7 @@ it("does not require or attach ingestion config in probe mode", () => {
 it("falls back to a synthetic runId when CLOUD_RUN_EXECUTION is unset", () => {
   process.env = {
     CANARY_MODE: "digest",
-    GLOO_AI_CLIENT_ID: "id",
-    GLOO_AI_CLIENT_SECRET: "secret",
+    GLOO_AI_API_KEY: "key",
     ALERTS_SLACK_BOT_TOKEN: "xoxb-fake",
     ALERTS_SLACK_CHANNEL_ID: "C123",
     CANARY_RESULTS_BUCKET: "bucket",

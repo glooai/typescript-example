@@ -46,10 +46,9 @@ injected out-of-band so they never hit Git or tfstate. Do this after the
 first `terraform apply` (which creates the empty secrets):
 
 ```bash
-printf '<real-client-id>'      | gcloud secrets versions add gloo-ai-canary-client-id     --data-file=-
-printf '<real-client-secret>'  | gcloud secrets versions add gloo-ai-canary-client-secret --data-file=-
-printf '<xoxb-slack-token>'    | gcloud secrets versions add alerts-slack-bot-token       --data-file=-
-printf 'C0AU2FM2Q86'           | gcloud secrets versions add alerts-slack-channel-id      --data-file=-
+printf '<real-api-key>'        | gcloud secrets versions add gloo-ai-canary-api-key  --data-file=-
+printf '<xoxb-slack-token>'    | gcloud secrets versions add alerts-slack-bot-token  --data-file=-
+printf 'C0AU2FM2Q86'           | gcloud secrets versions add alerts-slack-channel-id --data-file=-
 ```
 
 ### 3. GitHub Actions → GCP (Workload Identity Federation)

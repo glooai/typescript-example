@@ -22,8 +22,8 @@
  *
  * Behavior:
  *   - Runs against the real Gloo AI production API.
- *   - Skips cleanly when GLOO_CLIENT_ID / GLOO_CLIENT_SECRET are not set
- *     so `pnpm test` stays non-interactive and CI-safe.
+ *   - Skips cleanly when GLOO_AI_API_KEY is not set so `pnpm test` stays
+ *     non-interactive and CI-safe.
  *   - Tries each V2 routing mode (auto_routing, each model_family) so we
  *     can see whether the refusal is model-specific or platform-wide.
  *   - Asserts the reply is NOT a refusal. If this test fails, the bug is
@@ -33,11 +33,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { config as loadEnv } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import {
-  getAccessToken,
-  loadCredentials,
-  type Credentials,
-} from "../src/auth.js";
+import { loadApiKey } from "../src/auth.js";
 import {
   postCompletionsV2,
   looksLikeRefusal,
@@ -54,20 +50,17 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: resolve(__dirname, "../../.env.local") });
 
-// CI (see .github/workflows/ci.yaml) exports placeholder `test-*` credentials
-// so other unit tests can call loadCredentials() against a mocked fetch. Those
-// values are not valid against the live OAuth server, so the integration suite
-// must treat them as "no creds" and skip. Any cred value starting with
-// `test-` is considered a placeholder.
+// CI (see .github/workflows/ci.yaml) exports a placeholder `test-*` API key
+// so other unit tests can call loadApiKey() against a mocked fetch. That
+// value is not valid against the live platform, so the integration suite
+// must treat it as "no key" and skip. Any key value starting with `test-`
+// is considered a placeholder.
 function isPlaceholder(value: string | undefined): boolean {
   return !value || value.startsWith("test-");
 }
 
 export function credsAvailable(): boolean {
-  const id = process.env.GLOO_CLIENT_ID ?? process.env.GLOO_AI_CLIENT_ID;
-  const secret =
-    process.env.GLOO_CLIENT_SECRET ?? process.env.GLOO_AI_CLIENT_SECRET;
-  return !isPlaceholder(id) && !isPlaceholder(secret);
+  return !isPlaceholder(process.env.GLOO_AI_API_KEY);
 }
 
 // Verbatim prompts from the bug report screenshots — do not edit.
@@ -134,22 +127,14 @@ describe.skipIf(!credsAvailable())(
     let accessToken = "";
     let tokenError: Error | undefined;
 
-    beforeAll(async () => {
-      // Defensive: if credsAvailable() ever returns true for invalid creds
-      // (e.g., rotated secrets in CI), record the error so tests can skip
-      // cleanly instead of failing the whole suite.
-      const creds: Credentials = loadCredentials();
+    beforeAll(() => {
       try {
-        const token = await getAccessToken(creds);
-        if (!token.access_token) {
-          throw new Error("Access token missing from token response.");
-        }
-        accessToken = token.access_token;
+        accessToken = loadApiKey();
       } catch (error) {
         tokenError = error as Error;
         // eslint-disable-next-line no-console
         console.warn(
-          `[integration] Skipping — token fetch failed: ${tokenError.message}`
+          `[integration] Skipping, API key unavailable: ${tokenError.message}`
         );
       }
     }, 30_000);

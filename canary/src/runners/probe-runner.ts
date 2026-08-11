@@ -13,7 +13,6 @@
  * so the next decision has fresh state to read.
  */
 
-import { getAccessToken } from "@glooai/scripts";
 import type { Probe, ProbeOutcome } from "../probes/types.js";
 import type { CanaryConfig } from "../config.js";
 import { extractFamilies } from "../fixtures/index.js";
@@ -78,19 +77,10 @@ export async function runProbes(
   deps: ProbeRunnerDeps,
   now: Date = new Date()
 ): Promise<RunArtifact> {
-  const tokenResponse = await getAccessToken({
-    clientId: config.gloo.clientId,
-    clientSecret: config.gloo.clientSecret,
-  });
-  const accessToken = tokenResponse.access_token;
-  if (!accessToken) {
-    throw new Error("Access token missing from Gloo token response.");
-  }
-
   const outcomes: ProbeOutcome[] = [];
   for (const probe of deps.probes) {
     const outcome = await probe.run({
-      accessToken,
+      accessToken: config.gloo.apiKey,
       runId: config.execution.runId,
       startedAt: config.execution.startedAt,
     });

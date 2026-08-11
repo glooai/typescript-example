@@ -23,12 +23,7 @@
 
 import { config as loadEnv } from "dotenv";
 import { fileURLToPath } from "node:url";
-import {
-  loadCredentials,
-  getAccessToken,
-  withTimeout,
-  type Credentials,
-} from "./auth.js";
+import { loadApiKey, withTimeout } from "./auth.js";
 
 const V1_URL = "https://platform.ai.gloo.com/ai/v1/chat/completions";
 const V2_URL = "https://platform.ai.gloo.com/ai/v2/chat/completions";
@@ -182,19 +177,13 @@ export async function runCase(
 }
 
 export async function runAllCases(
-  credentials: Credentials,
+  apiKey: string,
   prompt: string = REPRO_PROMPT
 ): Promise<ReproOutcome[]> {
-  const tokenResponse = await getAccessToken(credentials);
-  const accessToken = tokenResponse.access_token;
-  if (!accessToken) {
-    throw new Error("Access token missing from token response.");
-  }
-
   const cases = buildCases(prompt);
   const outcomes: ReproOutcome[] = [];
   for (const testCase of cases) {
-    outcomes.push(await runCase(accessToken, testCase));
+    outcomes.push(await runCase(apiKey, testCase));
   }
   return outcomes;
 }
@@ -216,8 +205,8 @@ function formatOutcome(outcome: ReproOutcome): string {
 }
 
 export async function main(): Promise<void> {
-  const credentials = loadCredentials();
-  const outcomes = await runAllCases(credentials);
+  const apiKey = loadApiKey();
+  const outcomes = await runAllCases(apiKey);
 
   console.log("Sonnet 4 V1→V2 reduced repro");
   console.log("============================");

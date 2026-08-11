@@ -2,14 +2,9 @@ import { config as loadEnv } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
+import { loadApiKey, withTimeout } from "./auth.js";
 
-const TOKEN_URL = "https://platform.ai.gloo.com/oauth2/token";
 const INGESTION_URL = "https://platform.ai.gloo.com/ingestion/v2/files";
-
-export type IngestionCredentials = {
-  clientId: string;
-  clientSecret: string;
-};
 
 export type IngestionResponse = {
   success: boolean;
@@ -26,69 +21,8 @@ function requireEnv(name: string): string {
   return value;
 }
 
-function withTimeout(initMs: number): {
-  controller: AbortController;
-  clearTimer: () => void;
-} {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), initMs);
-  timeout.unref();
-
-  return { controller, clearTimer: () => clearTimeout(timeout) };
-}
-
-export function loadIngestionCredentials(): IngestionCredentials {
-  return {
-    clientId: process.env.GLOO_AI_CLIENT_ID ?? requireEnv("GLOO_CLIENT_ID"),
-    clientSecret:
-      process.env.GLOO_AI_CLIENT_SECRET ?? requireEnv("GLOO_CLIENT_SECRET"),
-  };
-}
-
 export function loadPublisherId(): string {
   return requireEnv("GLOO_PUBLISHER_ID");
-}
-
-export async function getIngestionToken(
-  credentials: IngestionCredentials
-): Promise<string> {
-  const { clientId, clientSecret } = credentials;
-  const encodedCredentials = Buffer.from(
-    `${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`
-  ).toString("base64");
-
-  const { controller, clearTimer } = withTimeout(10_000);
-
-  try {
-    const response = await fetch(TOKEN_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${encodedCredentials}`,
-      },
-      body: new URLSearchParams({
-        grant_type: "client_credentials",
-        scope: "api/access",
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(
-        `Token request failed with status ${response.status}: ${text}`
-      );
-    }
-
-    const data = (await response.json()) as { access_token?: string };
-    if (!data.access_token) {
-      throw new Error("Access token missing from token response.");
-    }
-
-    return data.access_token;
-  } finally {
-    clearTimer();
-  }
 }
 
 export type FileInput = {
@@ -105,10 +39,7 @@ export async function uploadFiles(
   formData.append("publisher_id", publisherId);
 
   for (const file of files) {
-    const blob = new Blob(
-      [typeof file.content === "string" ? file.content : file.content],
-      { type: "text/plain" }
-    );
+    const blob = new Blob([file.content], { type: "text/plain" });
     formData.append("files", blob, file.name);
   }
 
@@ -160,7 +91,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const credentials = loadIngestionCredentials();
+  const apiKey = loadApiKey();
   const publisherId = loadPublisherId();
 
   console.log("Gloo AI Ingestion v2 - File Upload");
@@ -170,8 +101,7 @@ async function main(): Promise<void> {
   console.log(`Uploading ${filePaths.length} file(s)...`);
   console.log();
 
-  const token = await getIngestionToken(credentials);
-  const result = await uploadFilesFromPaths(token, publisherId, filePaths);
+  const result = await uploadFilesFromPaths(apiKey, publisherId, filePaths);
 
   console.log("Response:");
   console.log(`  Success: ${result.success}`);

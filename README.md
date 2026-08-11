@@ -15,7 +15,7 @@ TypeScript examples for the [Gloo AI](https://www.ai.gloo.com/) platform API —
 
 - **Node.js LTS** (`.nvmrc` provided — run `nvm use` or `fnm use`)
 - **pnpm** (`corepack enable pnpm` if needed)
-- **Gloo AI credentials** — get a client ID and secret at https://studio.ai.gloo.com/build/keys
+- **Gloo AI API key**, get one at https://studio.ai.gloo.com/api-keys
 
 ## Setup
 
@@ -25,11 +25,11 @@ pnpm install
 
 # 2. Configure credentials for the CLI scripts
 cp scripts/.env.example scripts/.env.local
-# Edit scripts/.env.local with your GLOO_AI_CLIENT_ID and GLOO_AI_CLIENT_SECRET
+# Edit scripts/.env.local with your GLOO_AI_API_KEY
 
 # 3. Configure credentials for the chatbot
 cp chatbot/.env.local.example chatbot/.env.local
-# Edit chatbot/.env.local with your GLOO_AI_CLIENT_ID and GLOO_AI_CLIENT_SECRET
+# Edit chatbot/.env.local with your GLOO_AI_API_KEY
 ```
 
 ## Chatbot
@@ -48,7 +48,7 @@ pnpm --filter gloo-chatbot build
 
 ### Deploy to Vercel
 
-Set **Root Directory** to `chatbot` and add the environment variables `GLOO_CLIENT_ID` and `GLOO_CLIENT_SECRET`.
+Set **Root Directory** to `chatbot` and add the environment variable `GLOO_AI_API_KEY`.
 
 ## CLI Scripts
 
@@ -60,7 +60,7 @@ pnpm glooai:ingest          # Content ingestion
 pnpm glooai:items           # List items
 pnpm glooai:items:metadata  # Item metadata
 pnpm glooai:search          # Semantic search
-pnpm glooai:jwt             # Decode and inspect access token
+pnpm glooai:jwt             # Inspect the configured API key
 pnpm glooai:sonnet-4-repro  # Side-by-side: V1 Sonnet 4 vs. V2 Sonnet 4.5 / Haiku 4.5
 pnpm glooai:whats-new       # Validate the 2026-05-26 release notes (models, cache, errors)
 ```
@@ -69,7 +69,7 @@ pnpm glooai:whats-new       # Validate the 2026-05-26 release notes (models, cac
 
 `scripts/src/whats-new-2026-05-26.ts` programmatically validates the subset of
 the [Week of May 26, 2026 changelog](https://docs.gloo.com/) that can be checked
-automatically from a single OAuth client. Three checks, each backed by a pure,
+automatically from a single API key. Three checks, each backed by a pure,
 unit-tested classifier:
 
 | #   | Release-note claim                                        | How it's validated                                                                                                                                                                                             |
