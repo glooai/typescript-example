@@ -3,6 +3,7 @@ import { fetchModels } from "./api";
 import { ChatPanel } from "./components/ChatPanel";
 import { ComparePanel } from "./components/ComparePanel";
 import { ObservedPanel } from "./components/ObservedPanel";
+import { ThemeToggle } from "./components/ThemeToggle";
 import type { ModelSummary } from "./types";
 
 const TABS = [
@@ -34,9 +35,9 @@ export function App() {
       <header className="flex flex-none flex-wrap items-center gap-x-4 gap-y-3">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">
-            Gloo AI <span className="text-gold-500">Completions V2</span>
+            Gloo AI <span className="text-accent">Completions V2</span>
           </h1>
-          <p className="text-xs text-ink-500">
+          <p className="text-xs text-muted">
             Streaming chat and side by side routing comparison, proxied through
             a Lambda that holds the API key.
           </p>
@@ -44,7 +45,7 @@ export function App() {
 
         <nav
           aria-label="Views"
-          className="ml-auto flex rounded-xl border border-ink-800 bg-ink-900 p-1"
+          className="ml-auto flex rounded-xl border border-line bg-surface p-1"
         >
           {TABS.map((entry) => (
             <button
@@ -54,14 +55,16 @@ export function App() {
               onClick={() => setTab(entry.id)}
               className={`rounded-lg px-3.5 py-1.5 text-sm transition ${
                 tab === entry.id
-                  ? "bg-ink-800 text-ink-100"
-                  : "text-ink-500 hover:text-ink-300"
+                  ? "bg-raised text-body"
+                  : "text-muted hover:text-soft"
               }`}
             >
               {entry.label}
             </button>
           ))}
         </nav>
+
+        <ThemeToggle />
       </header>
 
       <main className="flex min-h-0 flex-1 flex-col">

@@ -1,28 +1,101 @@
 @import "tailwindcss";
 
 /*
- * Palette follows the Gloo AI wordmark: near-black ground, a single gold
- * accent (#FFD727 is the mid stop of the logo gradient), and low-contrast
- * hairline borders. Everything else is neutral so the accent stays
- * meaningful rather than decorative.
+ * Two themes, one set of component classes.
+ *
+ * Components never name a literal colour. They use semantic utilities
+ * (`bg-surface`, `text-muted`, `border-line`) whose theme variables point at
+ * a second variable that is redefined under `.dark` on the root element, so
+ * switching themes is one class on <html> and no component churn. The
+ * alternative, a `dark:` variant on every className, doubles the length of
+ * every class string in the app for the same result.
+ *
+ * The dark values are the original palette, which follows the Gloo AI
+ * wordmark: near-black ground, a single gold accent (#FFD727 is the mid stop
+ * of the logo gradient), and low-contrast hairline borders. The light values
+ * are their deliberate counterpart, warm neutrals rather than pure greys so
+ * the gold still belongs to the page, and every text pair clears WCAG AA.
  */
 @theme {
-  --color-ink-950: #08080a;
-  --color-ink-900: #0d0d10;
-  --color-ink-850: #131317;
-  --color-ink-800: #1a1a1f;
-  --color-ink-700: #26262d;
-  --color-ink-500: #6b6b76;
-  --color-ink-300: #a8a8b3;
-  --color-ink-100: #e8e8ec;
+  /* The brand gold is fixed. It is a light colour, so it stays a background
+     with dark text on it in both themes; `--accent` below is the readable
+     form for gold-as-text. */
   --color-gold-400: #ffde4b;
   --color-gold-500: #ffd727;
   --color-gold-600: #f6c414;
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-inset: var(--inset);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-body: var(--body-text);
+  --color-soft: var(--soft-text);
+  --color-muted: var(--muted-text);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-solid: var(--accent-solid);
+  --color-accent-solid-hover: var(--accent-solid-hover);
+  --color-on-accent: var(--on-accent);
+  --color-danger: var(--danger-text);
+  --color-danger-surface: var(--danger-surface);
+  --color-danger-line: var(--danger-line);
 
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* `dark:` is media-query driven by default in Tailwind v4, which would ignore
+   an explicit choice. Anything written with the variant follows the class. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+
+  --canvas: #faf9f6;
+  --surface: #ffffff;
+  --inset: #f5f3ee;
+  --raised: #eeebe3;
+  --line: #e5e2d9;
+  --line-strong: #cbc7bb;
+  --body-text: #16161a;
+  --soft-text: #3f3f47;
+  --muted-text: #61616b;
+  /* Gold on white is roughly 1.5:1. Text and hairline uses of the accent take
+     this darkened form instead, 5.4:1 on the surface. */
+  --accent: #8a6200;
+  --accent-soft: #fbf0c6;
+  --accent-solid: #ffd727;
+  --accent-solid-hover: #f6c414;
+  --on-accent: #08080a;
+  --danger-text: #9b1c1c;
+  --danger-surface: #fdf2f2;
+  --danger-line: #efc0c0;
+}
+
+:root.dark {
+  color-scheme: dark;
+
+  --canvas: #08080a;
+  --surface: #0d0d10;
+  --inset: #131317;
+  --raised: #1a1a1f;
+  --line: #1a1a1f;
+  --line-strong: #26262d;
+  --body-text: #e8e8ec;
+  --soft-text: #a8a8b3;
+  --muted-text: #6b6b76;
+  --accent: #ffd727;
+  --accent-soft: #2a2410;
+  --accent-solid: #ffd727;
+  --accent-solid-hover: #ffde4b;
+  --on-accent: #08080a;
+  --danger-text: #fca5a5;
+  --danger-surface: #24100f;
+  --danger-line: #5c1d1d;
 }
 
 html,
@@ -32,16 +105,16 @@ body,
 }
 
 body {
-  background-color: var(--color-ink-950);
-  color: var(--color-ink-100);
+  background-color: var(--canvas);
+  color: var(--body-text);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
-/* Subtle scrollbars: the panels are dark, default light scrollbars glare. */
+/* Subtle scrollbars: the default ones glare against either ground. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-ink-700) transparent;
+  scrollbar-color: var(--line-strong) transparent;
 }
 
 /*
@@ -81,20 +154,20 @@ body {
   margin-top: 0.25em;
 }
 .md a {
-  color: var(--color-gold-500);
+  color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 .md code {
   font-family: var(--font-mono);
   font-size: 0.875em;
-  background: var(--color-ink-800);
+  background: var(--raised);
   border-radius: 0.25rem;
   padding: 0.1em 0.35em;
 }
 .md pre {
-  background: var(--color-ink-950);
-  border: 1px solid var(--color-ink-800);
+  background: var(--canvas);
+  border: 1px solid var(--line);
   border-radius: 0.5rem;
   padding: 0.75rem;
   overflow-x: auto;
@@ -104,9 +177,9 @@ body {
   padding: 0;
 }
 .md blockquote {
-  border-left: 2px solid var(--color-ink-700);
+  border-left: 2px solid var(--line-strong);
   padding-left: 0.75rem;
-  color: var(--color-ink-300);
+  color: var(--soft-text);
 }
 .md table {
   width: 100%;
@@ -115,7 +188,7 @@ body {
 }
 .md th,
 .md td {
-  border: 1px solid var(--color-ink-800);
+  border: 1px solid var(--line);
   padding: 0.35rem 0.5rem;
   text-align: left;
 }

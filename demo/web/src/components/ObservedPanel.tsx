@@ -48,14 +48,14 @@ export function ObservedPanel() {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
       <div className="flex items-center gap-3">
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-muted">
           Measured across recent demo traffic. Rows expire automatically after
           seven days.
         </p>
         <button
           type="button"
           onClick={() => void load()}
-          className="ml-auto rounded-lg border border-ink-800 px-3 py-1.5 text-xs text-ink-300 transition hover:border-gold-500 hover:text-ink-100"
+          className="ml-auto rounded-lg border border-line px-3 py-1.5 text-xs text-soft transition hover:border-accent hover:text-body"
         >
           Refresh
         </button>
@@ -64,13 +64,13 @@ export function ObservedPanel() {
       {error && <ErrorNote message={error} />}
 
       <Panel className="overflow-hidden">
-        <h2 className="border-b border-ink-800 px-4 py-3 text-xs uppercase tracking-wider text-ink-500">
+        <h2 className="border-b border-line px-4 py-3 text-xs uppercase tracking-wider text-muted">
           Per model
         </h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-xs uppercase tracking-wider text-ink-500">
+              <tr className="text-left text-xs uppercase tracking-wider text-muted">
                 <th className="px-4 py-2 font-normal">Model</th>
                 <th className="px-4 py-2 font-normal">Calls</th>
                 <th className="px-4 py-2 font-normal">Avg latency</th>
@@ -80,8 +80,8 @@ export function ObservedPanel() {
             </thead>
             <tbody>
               {rollups.map((rollup) => (
-                <tr key={rollup.model} className="border-t border-ink-800">
-                  <td className="px-4 py-2 font-mono text-xs text-gold-500">
+                <tr key={rollup.model} className="border-t border-line">
+                  <td className="px-4 py-2 font-mono text-xs text-accent">
                     {shortModelName(rollup.model)}
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">
@@ -100,7 +100,7 @@ export function ObservedPanel() {
               ))}
               {rollups.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-sm text-ink-500">
+                  <td colSpan={5} className="px-4 py-6 text-sm text-muted">
                     {loading ? "Loading" : "No calls recorded yet."}
                   </td>
                 </tr>
@@ -111,13 +111,13 @@ export function ObservedPanel() {
       </Panel>
 
       <Panel className="overflow-hidden">
-        <h2 className="border-b border-ink-800 px-4 py-3 text-xs uppercase tracking-wider text-ink-500">
+        <h2 className="border-b border-line px-4 py-3 text-xs uppercase tracking-wider text-muted">
           Recent calls
         </h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-xs uppercase tracking-wider text-ink-500">
+              <tr className="text-left text-xs uppercase tracking-wider text-muted">
                 <th className="px-4 py-2 font-normal">When</th>
                 <th className="px-4 py-2 font-normal">Requested</th>
                 <th className="px-4 py-2 font-normal">Resolved</th>
@@ -128,14 +128,14 @@ export function ObservedPanel() {
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.requestId} className="border-t border-ink-800">
-                  <td className="px-4 py-2 font-mono text-xs text-ink-300">
+                <tr key={row.requestId} className="border-t border-line">
+                  <td className="px-4 py-2 font-mono text-xs text-soft">
                     {new Date(row.timestamp).toLocaleTimeString()}
                   </td>
-                  <td className="px-4 py-2 font-mono text-xs text-ink-300">
+                  <td className="px-4 py-2 font-mono text-xs text-soft">
                     {row.requested}
                   </td>
-                  <td className="px-4 py-2 font-mono text-xs text-gold-500">
+                  <td className="px-4 py-2 font-mono text-xs text-accent">
                     {row.status === "ok"
                       ? shortModelName(row.resolvedModel)
                       : "failed"}
@@ -154,7 +154,7 @@ export function ObservedPanel() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-sm text-ink-500">
+                  <td colSpan={6} className="px-4 py-6 text-sm text-muted">
                     {loading ? "Loading" : "No calls recorded yet."}
                   </td>
                 </tr>

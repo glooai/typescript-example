@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -12,6 +12,28 @@
       content="Streaming chat and side-by-side routing comparison on the Gloo Completions V2 API."
     />
     <link rel="icon" href="/favicon.png" type="image/png" />
+    <!-- Theme resolution has to happen before the first paint, so it is a
+         blocking inline script in the head rather than anything React does:
+         the module bundle loads too late to avoid a flash of the wrong
+         theme. An explicit choice wins, otherwise the OS decides. The key
+         is THEME_STORAGE_KEY in src/theme.ts. -->
+    <script>
+      (function () {
+        var stored = null;
+        try {
+          stored = localStorage.getItem("gloo_demo_theme");
+        } catch (error) {
+          // Storage can be unavailable (private browsing); the OS still answers.
+        }
+        var dark =
+          stored === "dark" ||
+          (stored !== "light" &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        if (dark) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

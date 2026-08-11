@@ -81,6 +81,24 @@ The `chatbot/` package in this repo already demonstrates the Next.js server
 rendered pattern. This one is deliberately the other shape: a static bundle on
 S3 with no server runtime, so the only compute is the proxy API service.
 
+### Light and dark
+
+The palette is a set of semantic CSS variables (`--surface`, `--line`,
+`--muted-text`, `--accent`) that Tailwind's theme tokens point at, so the
+components name a role rather than a colour and the two themes are two blocks
+of variable values in `web/src/index.css`. The alternative, a `dark:` variant
+on every className, doubles every class string in the app for the same result.
+
+The brand gold stays `#FFD727` wherever it is a background with dark text on
+it. Gold as _text_ is about 1.5:1 on white, so the accent variable resolves to
+a darkened gold in light mode; every text pair in both themes clears WCAG AA.
+
+An inline script in `web/index.html` resolves the theme before the first
+paint, because the module bundle loads too late to avoid a flash of the wrong
+one. An explicit choice in `localStorage` wins; with no choice stored the OS
+`prefers-color-scheme` decides, including when it changes mid-visit. The
+toggle in the header shows the theme it switches to.
+
 ### Streaming vs buffering
 
 `/api/chat` streams. The server writes Gloo's SSE straight into a chunked

@@ -49,7 +49,7 @@ function findWinners(results: CompareResult[]): {
 
 function Badge({ children }: { children: string }) {
   return (
-    <span className="rounded-full bg-gold-500/15 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wider text-gold-500">
+    <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wider text-accent">
       {children}
     </span>
   );
@@ -64,11 +64,11 @@ function ResultCard({
 }) {
   return (
     <Panel className="flex min-h-0 flex-col overflow-hidden">
-      <div className="flex flex-wrap items-center gap-2 border-b border-ink-800 px-4 py-3">
-        <span className="font-mono text-sm text-gold-500">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
+        <span className="font-mono text-sm text-accent">
           {shortModelName(result.resolvedModel)}
         </span>
-        <span className="text-xs text-ink-500">via {result.requested}</span>
+        <span className="text-xs text-muted">via {result.requested}</span>
         <span className="ml-auto flex gap-1.5">
           {badges.map((badge) => (
             <Badge key={badge}>{badge}</Badge>
@@ -80,13 +80,13 @@ function ResultCard({
         {result.status === "ok" ? (
           <Markdown>{result.text}</Markdown>
         ) : (
-          <p className="text-sm text-red-300">
+          <p className="text-sm text-danger">
             {result.errorMessage ?? "The call failed."}
           </p>
         )}
       </div>
 
-      <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-ink-800 px-4 py-3">
+      <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-line px-4 py-3">
         <Stat label="Latency" value={formatLatency(result.latencyMs)} />
         <Stat label="Cost" value={formatCost(result.costUsd)} />
         <Stat
@@ -148,14 +148,14 @@ export function ComparePanel({ models }: { models: ModelSummary[] }) {
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
       <Panel className="flex flex-col gap-4 p-4">
         <label className="flex flex-col gap-2">
-          <span className="text-xs uppercase tracking-wider text-ink-500">
+          <span className="text-xs uppercase tracking-wider text-muted">
             Prompt
           </span>
           <textarea
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             rows={3}
-            className="resize-none rounded-xl border border-ink-800 bg-ink-850 px-3.5 py-3 text-sm outline-none transition placeholder:text-ink-500 focus:border-gold-500"
+            className="resize-none rounded-xl border border-line bg-inset px-3.5 py-3 text-sm outline-none transition placeholder:text-muted focus:border-accent"
           />
         </label>
 
@@ -163,9 +163,9 @@ export function ComparePanel({ models }: { models: ModelSummary[] }) {
           {variants.map((variant, index) => (
             <div
               key={index}
-              className="flex flex-wrap items-center gap-3 rounded-xl border border-ink-800 bg-ink-850 px-3 py-2.5"
+              className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-inset px-3 py-2.5"
             >
-              <span className="font-mono text-xs text-ink-500">
+              <span className="font-mono text-xs text-muted">
                 {String(index + 1).padStart(2, "0")}
               </span>
               <RoutingPicker
@@ -182,7 +182,7 @@ export function ComparePanel({ models }: { models: ModelSummary[] }) {
                       current.filter((_, position) => position !== index)
                     )
                   }
-                  className="ml-auto text-xs text-ink-500 transition hover:text-ink-100"
+                  className="ml-auto text-xs text-muted transition hover:text-body"
                 >
                   Remove
                 </button>
@@ -196,7 +196,7 @@ export function ComparePanel({ models }: { models: ModelSummary[] }) {
             type="button"
             onClick={() => void run()}
             disabled={busy || prompt.trim().length === 0}
-            className="rounded-xl bg-gold-500 px-5 py-2.5 text-sm font-semibold text-ink-950 transition hover:bg-gold-400 disabled:opacity-40"
+            className="rounded-xl bg-accent-solid px-5 py-2.5 text-sm font-semibold text-on-accent transition hover:bg-accent-solid-hover disabled:opacity-40"
           >
             {busy ? "Running" : "Run comparison"}
           </button>
@@ -206,12 +206,12 @@ export function ComparePanel({ models }: { models: ModelSummary[] }) {
               onClick={() =>
                 setVariants((current) => [...current, { mode: "auto_routing" }])
               }
-              className="text-xs text-ink-500 transition hover:text-ink-100"
+              className="text-xs text-muted transition hover:text-body"
             >
               Add a variant
             </button>
           )}
-          <span className="ml-auto text-xs text-ink-500">
+          <span className="ml-auto text-xs text-muted">
             All variants run concurrently against the same prompt.
           </span>
         </div>
@@ -220,7 +220,7 @@ export function ComparePanel({ models }: { models: ModelSummary[] }) {
       {error && <ErrorNote message={error} />}
 
       {busy && (
-        <p className="px-1 text-sm text-ink-500">
+        <p className="px-1 text-sm text-muted">
           Waiting on {variants.length} routing variants
         </p>
       )}
