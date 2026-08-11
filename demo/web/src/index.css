@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+/*
+ * Palette follows the Gloo AI wordmark: near-black ground, a single gold
+ * accent (#FFD727 is the mid stop of the logo gradient), and low-contrast
+ * hairline borders. Everything else is neutral so the accent stays
+ * meaningful rather than decorative.
+ */
+@theme {
+  --color-ink-950: #08080a;
+  --color-ink-900: #0d0d10;
+  --color-ink-850: #131317;
+  --color-ink-800: #1a1a1f;
+  --color-ink-700: #26262d;
+  --color-ink-500: #6b6b76;
+  --color-ink-300: #a8a8b3;
+  --color-ink-100: #e8e8ec;
+  --color-gold-400: #ffde4b;
+  --color-gold-500: #ffd727;
+  --color-gold-600: #f6c414;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-ink-950);
+  color: var(--color-ink-100);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle scrollbars: the panels are dark, default light scrollbars glare. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-700) transparent;
+}
+
+/*
+ * Markdown rendering. The chatbot package uses @tailwindcss/typography;
+ * this app has a much narrower surface (assistant prose only) so a handful
+ * of rules is cheaper than another dependency.
+ */
+.md > * + * {
+  margin-top: 0.75em;
+}
+.md h1,
+.md h2,
+.md h3 {
+  font-weight: 600;
+  line-height: 1.3;
+}
+.md h1 {
+  font-size: 1.15rem;
+}
+.md h2 {
+  font-size: 1.05rem;
+}
+.md h3 {
+  font-size: 1rem;
+}
+.md ul,
+.md ol {
+  padding-left: 1.25rem;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md li + li {
+  margin-top: 0.25em;
+}
+.md a {
+  color: var(--color-gold-500);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.md code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--color-ink-800);
+  border-radius: 0.25rem;
+  padding: 0.1em 0.35em;
+}
+.md pre {
+  background: var(--color-ink-950);
+  border: 1px solid var(--color-ink-800);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  overflow-x: auto;
+}
+.md pre code {
+  background: transparent;
+  padding: 0;
+}
+.md blockquote {
+  border-left: 2px solid var(--color-ink-700);
+  padding-left: 0.75rem;
+  color: var(--color-ink-300);
+}
+.md table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875em;
+}
+.md th,
+.md td {
+  border: 1px solid var(--color-ink-800);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}

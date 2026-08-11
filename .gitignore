@@ -16,6 +16,7 @@ pr.md
 
 # Terraform
 **/.terraform/
+**/.terraform-artifacts/
 **/.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
