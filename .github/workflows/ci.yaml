@@ -113,6 +113,11 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    # Real key so the integration suite (completions-v2-moderation,
+    # ai-sdk-structured-refusal) makes live, billed calls against the
+    # Gloo AI API on every PR instead of skipping on the placeholder.
+    env:
+      GLOO_AI_API_KEY: ${{ secrets.GLOO_AI_API_KEY }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -138,6 +143,8 @@ jobs:
   test-coverage:
     name: test:coverage
     runs-on: ubuntu-latest
+    env:
+      GLOO_AI_API_KEY: ${{ secrets.GLOO_AI_API_KEY }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
