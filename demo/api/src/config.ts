@@ -1,11 +1,11 @@
 /**
- * Runtime configuration for the proxy Lambda.
+ * Runtime configuration for the proxy service.
  *
  * The Gloo API key is never a Terraform variable and never a plaintext
- * Lambda environment variable. Terraform creates an empty Secrets Manager
- * secret and grants this function `GetSecretValue` on that ARN alone; a
- * human populates the value out of band. The key is fetched once per
- * execution environment and held in module scope.
+ * container environment variable. Terraform creates an empty Secrets Manager
+ * secret and grants the ECS task role `GetSecretValue` on that ARN alone; a
+ * human populates the value out of band. The key is fetched once at startup
+ * and held in module scope.
  */
 import {
   GetSecretValueCommand,
@@ -20,14 +20,21 @@ function requireEnv(name: string): string {
   return value;
 }
 
+/**
+ * Matches the port the ALB target group forwards to, which follows the
+ * convention already set by the `genesis` service on this cluster.
+ */
+const DEFAULT_PORT = 5174;
+
 export type Config = {
   tableName: string;
   glooApiKeySecretId: string;
+  port: number;
   /**
-   * Shared value CloudFront injects as a custom origin header. The Function
-   * URL itself is public (auth type NONE, so that response streaming works
-   * without SigV4 body signing), so the function rejects anything that did
-   * not arrive through our distribution.
+   * Shared value CloudFront injects as a custom origin header. This service
+   * sits behind a shared internet-facing ALB with no origin-access-control
+   * equivalent, so the header is what tells traffic that came through our
+   * distribution apart from anyone who finds the origin hostname.
    */
   originSecret: string;
   /**
@@ -40,9 +47,11 @@ export type Config = {
 };
 
 export function loadConfig(): Config {
+  const port = Number.parseInt(process.env.PORT ?? "", 10);
   return {
     tableName: requireEnv("DEMO_TABLE_NAME"),
     glooApiKeySecretId: requireEnv("GLOO_API_KEY_SECRET_ID"),
+    port: Number.isInteger(port) && port > 0 ? port : DEFAULT_PORT,
     originSecret: requireEnv("ORIGIN_SECRET"),
     visitorSalt: requireEnv("VISITOR_SALT"),
   };

@@ -17,10 +17,16 @@ terraform {
   }
 }
 
-# The servant.run hosted zone, the ACM certificate CloudFront needs, and the
-# Lambda all live in the same account and region. There is no cross-account
-# DNS delegation to work around.
 provider "aws" {
   region  = var.region
   profile = var.aws_profile
+}
+
+# servant.run's Route53 hosted zone lives in a separate AWS account
+# (dns_aws_profile) from everything else in this stack (aws_profile). Only
+# the zone lookup and the records that write into it use this provider.
+provider "aws" {
+  alias   = "dns"
+  region  = var.region
+  profile = var.dns_aws_profile
 }

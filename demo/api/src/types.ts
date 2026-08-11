@@ -1,6 +1,6 @@
 /**
  * Shared request/response contracts between the static SPA and the proxy
- * Lambda. The SPA imports nothing from this package at build time (it is a
+ * API service. The SPA imports nothing from this package at build time (it is a
  * separate workspace with its own copy of the response types), so these are
  * plain structural types with no runtime dependency.
  */

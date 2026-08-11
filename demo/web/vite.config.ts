@@ -7,8 +7,8 @@ import tailwindcss from "@tailwindcss/vite";
  * CloudFront, so there is no server runtime and no bundler-time secret.
  *
  * In development `/api/*` is proxied to whatever `DEMO_API_URL` points at
- * (a deployed Lambda Function URL), which keeps the local app on the same
- * relative paths it uses in production.
+ * (the deployed API origin, or a locally running one), which keeps the local
+ * app on the same relative paths it uses in production.
  */
 export default defineConfig({
   plugins: [react(), tailwindcss()],

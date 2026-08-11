@@ -1,19 +1,20 @@
 /**
- * Bundle the Lambda handler into a single ESM file that Terraform zips.
+ * Bundle the API service into a single ESM file for the container image.
  *
- * Dependencies are bundled rather than left to the runtime's built-in AWS
- * SDK so the deployed artifact is reproducible and does not shift when AWS
- * updates the managed runtime's SDK version.
+ * Bundling rather than shipping node_modules keeps the runtime image to a
+ * base image plus one file, so the Dockerfile needs no production install
+ * stage and the deployed artifact does not shift when a transitive
+ * dependency republishes.
  */
 import { build } from "esbuild";
 import { rm } from "node:fs/promises";
 
-const outdir = "dist/lambda";
+const outdir = "dist/server";
 
 await rm("dist", { recursive: true, force: true });
 
 await build({
-  entryPoints: ["src/handler.ts"],
+  entryPoints: ["src/index.ts"],
   outfile: `${outdir}/index.mjs`,
   bundle: true,
   platform: "node",
@@ -21,7 +22,8 @@ await build({
   format: "esm",
   minify: true,
   sourcemap: false,
-  // `awslambda` is injected by the Lambda runtime, not importable.
+  // The AWS SDK reaches for `require` in a few CommonJS interop paths that
+  // survive bundling to ESM; this gives them one.
   banner: {
     js: "import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);",
   },

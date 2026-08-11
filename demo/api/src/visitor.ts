@@ -1,8 +1,8 @@
 /**
  * Anonymous visitor identity and per-request technical metadata.
  *
- * Why this lives in the Lambda and not in a CloudFront function
- * -------------------------------------------------------------
+ * Why this lives in the API service and not in a CloudFront function
+ * ------------------------------------------------------------------
  * There are three places a cookie could be minted:
  *
  *   1. `functions/basic-auth.js`, a viewer-request function. It runs before
@@ -13,9 +13,9 @@
  *      `crypto`, so the id would come from `Math.random()`, and it would be
  *      a second published function plus a second cache-behavior association
  *      to maintain.
- *   3. This handler.
+ *   3. This service.
  *
- * This handler wins. It is the only component that writes the DynamoDB rows
+ * This service wins. It is the only component that writes the DynamoDB rows
  * the id is a trace key *for*, it has real `crypto.randomUUID()`, and the
  * static asset loads a viewer-response function would cover produce no rows
  * to correlate anyway. The cost is that a visitor who loads the page and
@@ -45,7 +45,22 @@
  * localStorage session id is recorded next to it as the fallback correlator.
  */
 import { createHash, randomUUID } from "node:crypto";
-import type { LambdaFunctionURLEvent } from "aws-lambda";
+import type { IncomingMessage } from "node:http";
+
+/**
+ * The part of a Node request this module reads. Structural rather than
+ * `IncomingMessage` so the tests can hand it a literal without standing up a
+ * socket.
+ */
+export type VisitorRequest = Pick<IncomingMessage, "headers"> & {
+  socket?: { remoteAddress?: string | undefined };
+};
+
+/** Header values arrive as `string | string[]`; only the single form is used here. */
+function header(request: VisitorRequest, name: string): string | undefined {
+  const value = request.headers[name];
+  return Array.isArray(value) ? value[0] : value;
+}
 
 /** First-party cookie carrying the opaque anonymous visitor id. */
 export const VISITOR_COOKIE_NAME = "gloo_demo_vid";
@@ -127,26 +142,15 @@ export function parseCookieHeader(
 }
 
 /**
- * Read the visitor id a browser sent back. Function URL events expose
- * cookies twice, as a `cookies` array and as the raw `cookie` header, and
- * which one is populated depends on the payload version, so both are read.
- * An id that does not match the minted format is ignored rather than
- * trusted: this value ends up in a DynamoDB attribute, so it is treated as
- * untrusted input like any other header.
+ * Read the visitor id a browser sent back. An id that does not match the
+ * minted format is ignored rather than trusted: this value ends up in a
+ * DynamoDB attribute, so it is treated as untrusted input like any other
+ * header.
  */
-export function readVisitorCookie(
-  event: LambdaFunctionURLEvent
-): string | null {
-  const candidates = new Map<string, string>();
-  for (const entry of event.cookies ?? []) {
-    for (const [name, value] of parseCookieHeader(entry)) {
-      candidates.set(name, value);
-    }
-  }
-  for (const [name, value] of parseCookieHeader(event.headers?.cookie)) {
-    candidates.set(name, value);
-  }
-  const id = candidates.get(VISITOR_COOKIE_NAME);
+export function readVisitorCookie(request: VisitorRequest): string | null {
+  const id = parseCookieHeader(header(request, "cookie")).get(
+    VISITOR_COOKIE_NAME
+  );
   return id && isVisitorId(id) ? id : null;
 }
 
@@ -154,7 +158,7 @@ export function readVisitorCookie(
  * Serialise the `Set-Cookie` value.
  *
  * `HttpOnly` because nothing in the SPA reads this: the browser attaches it
- * to the same-origin `/api/*` calls and the Lambda reads it there.
+ * to the same-origin `/api/*` calls and the API service reads it there.
  *
  * `SameSite=Lax` rather than `Strict`. Both work for the app itself, whose
  * every request is same-origin XHR from a page on the same host. `Lax` is
@@ -177,19 +181,18 @@ export function visitorCookie(
 }
 
 /**
- * The viewer's IP. CloudFront terminates the connection, so
- * `requestContext.http.sourceIp` is a CloudFront edge address; the viewer
- * address is the first entry of `X-Forwarded-For`, which CloudFront sets.
- * The direct `sourceIp` is the fallback for a request that somehow reached
- * the Function URL without going through the distribution.
+ * The viewer's IP. Two proxies sit in front of this process (CloudFront,
+ * then the ALB) and each appends to `X-Forwarded-For`, so the viewer address
+ * is the *first* entry. The socket address is the fallback for a request
+ * that reached the container without going through either, which in practice
+ * means an ALB health check.
  */
-export function clientIp(event: LambdaFunctionURLEvent): string | null {
-  const forwarded = event.headers?.["x-forwarded-for"];
-  const first = forwarded?.split(",")[0]?.trim();
+export function clientIp(request: VisitorRequest): string | null {
+  const first = header(request, "x-forwarded-for")?.split(",")[0]?.trim();
   if (first) {
     return first;
   }
-  return event.requestContext?.http?.sourceIp || null;
+  return request.socket?.remoteAddress || null;
 }
 
 /** Salted, truncated SHA-256. Not reversible, not portable across deploys. */
@@ -203,8 +206,8 @@ export function hashIp(ip: string | null, salt: string): string | null {
     .slice(0, IP_HASH_LENGTH);
 }
 
-function readUserAgent(event: LambdaFunctionURLEvent): string | null {
-  const raw = event.headers?.["user-agent"]?.trim();
+function readUserAgent(request: VisitorRequest): string | null {
+  const raw = header(request, "user-agent")?.trim();
   if (!raw) {
     return null;
   }
@@ -216,16 +219,16 @@ function readUserAgent(event: LambdaFunctionURLEvent): string | null {
  * request: the worst case is a freshly minted id with no IP hash.
  */
 export function resolveVisitor(
-  event: LambdaFunctionURLEvent,
+  request: VisitorRequest,
   salt: string
 ): VisitorContext {
-  const existing = readVisitorCookie(event);
+  const existing = readVisitorCookie(request);
   const visitorId = existing ?? mintVisitorId();
   return {
     visitorId,
     visitorIdSource: existing ? "cookie" : "issued",
-    ipHash: hashIp(clientIp(event), salt),
-    userAgent: readUserAgent(event),
+    ipHash: hashIp(clientIp(request), salt),
+    userAgent: readUserAgent(request),
     // Re-offered on every request that arrived without a usable cookie, so
     // a client that starts accepting cookies later picks one up without any
     // special case, and a client that never does simply keeps ignoring it.

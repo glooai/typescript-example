@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { LambdaFunctionURLEvent } from "aws-lambda";
+import type { VisitorRequest } from "../src/visitor.js";
 import {
   VISITOR_COOKIE_MAX_AGE_SECONDS,
   VISITOR_COOKIE_NAME,
@@ -18,20 +18,16 @@ import {
 const SALT = "test-salt";
 const KNOWN_ID = "v-0123456789abcdef0123456789abcdef";
 
-function event(
+function request(
   overrides: {
     headers?: Record<string, string>;
-    cookies?: string[];
     sourceIp?: string;
   } = {}
-): LambdaFunctionURLEvent {
+): VisitorRequest {
   return {
     headers: overrides.headers ?? {},
-    cookies: overrides.cookies,
-    requestContext: {
-      http: { method: "POST", sourceIp: overrides.sourceIp ?? "" },
-    },
-  } as unknown as LambdaFunctionURLEvent;
+    socket: { remoteAddress: overrides.sourceIp },
+  };
 }
 
 describe("parseCookieHeader", () => {
@@ -62,15 +58,7 @@ describe("parseCookieHeader", () => {
 describe("readVisitorCookie", () => {
   it("reads the id from the cookie header", () => {
     const found = readVisitorCookie(
-      event({ headers: { cookie: `${VISITOR_COOKIE_NAME}=${KNOWN_ID}` } })
-    );
-
-    expect(found).toBe(KNOWN_ID);
-  });
-
-  it("reads the id from the Function URL cookies array", () => {
-    const found = readVisitorCookie(
-      event({ cookies: ["other=1", `${VISITOR_COOKIE_NAME}=${KNOWN_ID}`] })
+      request({ headers: { cookie: `${VISITOR_COOKIE_NAME}=${KNOWN_ID}` } })
     );
 
     expect(found).toBe(KNOWN_ID);
@@ -80,17 +68,17 @@ describe("readVisitorCookie", () => {
     for (const value of ["", "not-an-id", "v-short", `${KNOWN_ID}extra`]) {
       expect(
         readVisitorCookie(
-          event({ headers: { cookie: `${VISITOR_COOKIE_NAME}=${value}` } })
+          request({ headers: { cookie: `${VISITOR_COOKIE_NAME}=${value}` } })
         )
       ).toBeNull();
     }
   });
 
   it("returns null when the visitor cookie is absent", () => {
-    expect(readVisitorCookie(event({ headers: { cookie: "other=1" } }))).toBe(
+    expect(readVisitorCookie(request({ headers: { cookie: "other=1" } }))).toBe(
       null
     );
-    expect(readVisitorCookie(event())).toBeNull();
+    expect(readVisitorCookie(request())).toBeNull();
   });
 });
 
@@ -120,7 +108,7 @@ describe("visitorCookie", () => {
 describe("clientIp", () => {
   it("prefers the first X-Forwarded-For entry, which CloudFront sets", () => {
     const found = clientIp(
-      event({
+      request({
         headers: { "x-forwarded-for": "203.0.113.7, 70.132.1.1" },
         sourceIp: "70.132.1.1",
       })
@@ -130,11 +118,13 @@ describe("clientIp", () => {
   });
 
   it("falls back to the direct source IP when there is no forwarded header", () => {
-    expect(clientIp(event({ sourceIp: "198.51.100.4" }))).toBe("198.51.100.4");
+    expect(clientIp(request({ sourceIp: "198.51.100.4" }))).toBe(
+      "198.51.100.4"
+    );
   });
 
   it("returns null when neither is available", () => {
-    expect(clientIp(event())).toBeNull();
+    expect(clientIp(request())).toBeNull();
   });
 });
 
@@ -165,7 +155,7 @@ describe("hashIp", () => {
 
 describe("resolveVisitor with a cookie", () => {
   const visitor = resolveVisitor(
-    event({
+    request({
       headers: {
         cookie: `${VISITOR_COOKIE_NAME}=${KNOWN_ID}`,
         "user-agent": "Mozilla/5.0 (Macintosh)",
@@ -192,7 +182,7 @@ describe("resolveVisitor with a cookie", () => {
 
   it("truncates an overlong User-Agent", () => {
     const long = resolveVisitor(
-      event({ headers: { "user-agent": "u".repeat(1000) } }),
+      request({ headers: { "user-agent": "u".repeat(1000) } }),
       SALT
     );
 
@@ -202,7 +192,7 @@ describe("resolveVisitor with a cookie", () => {
 
 describe("resolveVisitor without a cookie", () => {
   it("mints an id, offers the cookie, and flags it as not yet durable", () => {
-    const visitor = resolveVisitor(event({ sourceIp: "198.51.100.4" }), SALT);
+    const visitor = resolveVisitor(request({ sourceIp: "198.51.100.4" }), SALT);
 
     expect(isVisitorId(visitor.visitorId)).toBe(true);
     expect(visitor.visitorIdSource).toBe("issued");
@@ -214,7 +204,7 @@ describe("resolveVisitor without a cookie", () => {
     // Two requests from a browser that drops the cookie every time. Both
     // still resolve, both still carry technical metadata, and neither one
     // claims a durable identity.
-    const blocked = event({
+    const blocked = request({
       headers: {
         "user-agent": "Safari/private",
         "x-forwarded-for": "203.0.113.7",
@@ -231,7 +221,7 @@ describe("resolveVisitor without a cookie", () => {
   });
 
   it("still resolves when there is no IP, no User-Agent, and no headers", () => {
-    const visitor = resolveVisitor(event(), SALT);
+    const visitor = resolveVisitor(request(), SALT);
 
     expect(isVisitorId(visitor.visitorId)).toBe(true);
     expect(visitor.ipHash).toBeNull();
@@ -242,7 +232,7 @@ describe("resolveVisitor without a cookie", () => {
 describe("toVisitorTrace", () => {
   it("carries the session id as the fallback correlator", () => {
     const visitor = resolveVisitor(
-      event({
+      request({
         headers: { "user-agent": "curl/8", "x-forwarded-for": "203.0.113.7" },
       }),
       SALT
@@ -259,7 +249,7 @@ describe("toVisitorTrace", () => {
   });
 
   it("omits attributes it has no value for rather than writing nulls", () => {
-    const trace = toVisitorTrace(resolveVisitor(event(), SALT));
+    const trace = toVisitorTrace(resolveVisitor(request(), SALT));
 
     expect(Object.keys(trace).sort()).toEqual([
       "visitor_id",

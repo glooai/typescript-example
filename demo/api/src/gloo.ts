@@ -1,8 +1,8 @@
 /**
- * Gloo Completions V2 client used by the proxy Lambda.
+ * Gloo Completions V2 client used by the proxy service.
  *
- * The API key never leaves this process: the browser talks to the Lambda,
- * the Lambda talks to Gloo. Same Bearer-credential pattern as
+ * The API key never leaves this process: the browser talks to the proxy,
+ * the proxy talks to Gloo. Same Bearer-credential pattern as
  * `scripts/src/gloo-ai-sdk.ts` and `chatbot/lib/gloo-provider.ts`, minus
  * the AI SDK, because the proxy forwards raw OpenAI-shaped SSE frames
  * rather than re-encoding them.
@@ -14,7 +14,12 @@ import { estimateCostUsd, type PricingIndex } from "./pricing.js";
 export const GLOO_COMPLETIONS_URL =
   "https://platform.ai.gloo.com/ai/v2/chat/completions";
 
-/** Upper bound on any single upstream call. Function URLs cap out well past this. */
+/**
+ * Upper bound on any single upstream call. The ALB and the CloudFront origin
+ * both time out after 60s of silence rather than 60s in total, and a stream
+ * that is producing tokens is never silent, so this only bites a call that
+ * has genuinely stalled.
+ */
 const UPSTREAM_TIMEOUT_MS = 60_000;
 
 /** Running totals scraped out of an OpenAI-shaped completion or SSE stream. */
