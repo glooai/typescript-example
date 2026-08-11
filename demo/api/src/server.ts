@@ -24,6 +24,7 @@
  * exists to correlate. See `visitor.ts` for that reasoning in full. Nothing
  * on any route depends on the cookie being present.
  */
+import { randomUUID } from "node:crypto";
 import {
   createServer as createHttpServer,
   type IncomingMessage,
@@ -169,7 +170,7 @@ async function handleChat(
 
   const pricing = await loadRegistry();
   const accumulator = createAccumulator();
-  const requestId = crypto.randomUUID();
+  const requestId = randomUUID();
   const startedAt = Date.now();
 
   try {
@@ -218,7 +219,7 @@ async function runVariant(
   gloo: GlooClient,
   pricing: Awaited<ReturnType<typeof loadRegistry>>
 ): Promise<CallMetrics & { text: string }> {
-  const requestId = crypto.randomUUID();
+  const requestId = randomUUID();
   const startedAt = Date.now();
   try {
     const accumulator = await gloo.complete(
