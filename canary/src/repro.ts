@@ -170,6 +170,10 @@ export async function main(argv: string[]): Promise<void> {
       `Signature(s) not in the current registry-hydrated fixture set: ${missing.join(", ")}. Run --list to see valid signatures.`
     );
   }
+  const selected = signatures.flatMap((s) => {
+    const fixture = bySignature.get(s);
+    return fixture ? [fixture] : [];
+  });
 
   const apiKey = process.env.GLOO_AI_API_KEY;
   if (!apiKey) {
@@ -193,8 +197,9 @@ export async function main(argv: string[]): Promise<void> {
       `\nRun id: ${ctx.runId}\n`
   );
 
-  for (const signature of signatures) {
-    const fixture = applyMaxTokens(bySignature.get(signature)!, options);
+  for (const selectedFixture of selected) {
+    const signature = selectedFixture.signature;
+    const fixture = applyMaxTokens(selectedFixture, options);
     const probe = buildV2Probe(fixture);
     const verdicts: string[] = [];
 

@@ -10,6 +10,8 @@ import {
   humanBytes,
   percentile,
   summarize,
+  type DigestSummary,
+  type PerProbeEntry,
 } from "../../src/runners/digest-runner.js";
 import type { RunArtifact } from "../../src/sinks/gcs.js";
 import type { ProbeOutcome } from "../../src/probes/types.js";
@@ -28,6 +30,29 @@ function makeOutcome(partial: Partial<ProbeOutcome> = {}): ProbeOutcome {
     durationMs: 1000,
     details: {},
     completedAt: Math.floor(NOW.getTime() / 1000),
+    ...partial,
+  };
+}
+
+const NO_ARCHIVAL: DigestSummary["archival"] = {
+  objectCount: 0,
+  oldestAgeDays: null,
+  totalBytes: 0,
+};
+
+function makeEntry(partial: Partial<PerProbeEntry> = {}): PerProbeEntry {
+  return {
+    signature: "v2/a",
+    label: "V2 · A",
+    total: 0,
+    passing: 0,
+    failing: 0,
+    yellowing: 0,
+    p50Ms: 0,
+    p99Ms: 0,
+    worstSeverity: "GREEN",
+    failures: [],
+    yellowOutcomes: [],
     ...partial,
   };
 }
@@ -114,11 +139,7 @@ it("summarize assigns worstSeverity = YELLOW when a probe has yellow-only outcom
       durationMs: 9500,
     }),
   ]);
-  const summary = summarize(
-    [artifact],
-    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
-    NOW
-  );
+  const summary = summarize([artifact], NO_ARCHIVAL, NOW);
   const slow = summary.perProbe.find((p) => p.signature === "v2/slow");
   expect(slow?.worstSeverity).toBe("YELLOW");
   expect(slow?.yellowing).toBe(1);
@@ -142,11 +163,7 @@ it("summarize escalates worstSeverity to RED when any outcome is RED", () => {
       httpStatus: 503,
     }),
   ]);
-  const summary = summarize(
-    [artifact],
-    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
-    NOW
-  );
+  const summary = summarize([artifact], NO_ARCHIVAL, NOW);
   const mixed = summary.perProbe.find((p) => p.signature === "v2/mixed");
   expect(mixed?.worstSeverity).toBe("RED");
   // Yellow outcome is still captured for the yellow breakdown section.
@@ -171,7 +188,7 @@ it("top-level digest hides fully-green probes behind a roll-up line", () => {
         }),
       ]),
     ],
-    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
+    NO_ARCHIVAL,
     NOW
   );
   const post = formatDigestTopLevel(summary);
@@ -205,7 +222,7 @@ it("top-level digest surfaces YELLOW probes alongside REDs", () => {
         }),
       ]),
     ],
-    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
+    NO_ARCHIVAL,
     NOW
   );
   const post = formatDigestTopLevel(summary);
@@ -221,7 +238,7 @@ it("top-level digest uses an all-green header and a celebratory body when nothin
         makeOutcome({ signature: "v2/b" }),
       ]),
     ],
-    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
+    NO_ARCHIVAL,
     NOW
   );
   const post = formatDigestTopLevel(summary);
@@ -237,11 +254,7 @@ it("top-level digest uses rotating-light when runsFound is 0 (watchdog guard)", 
   // An empty window — no GCS artifacts — should NEVER render green.
   // Green + "Probes run: 0" was the confusing pattern from the 2026-05-11
   // race condition incident; this test is the regression guard.
-  const summary = summarize(
-    [],
-    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
-    NOW
-  );
+  const summary = summarize([], NO_ARCHIVAL, NOW);
   expect(summary.runsFound).toBe(0);
   const post = formatDigestTopLevel(summary);
   expect(post).toContain(":rotating_light:");
@@ -259,7 +272,7 @@ it("top-level digest uses the rotating-light emoji when any probe is RED", () =>
         }),
       ]),
     ],
-    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
+    NO_ARCHIVAL,
     NOW
   );
   expect(formatDigestTopLevel(redSummary)).toContain(":rotating_light:");
@@ -267,32 +280,20 @@ it("top-level digest uses the rotating-light emoji when any probe is RED", () =>
 
 it("formatAllGreenThread lists each fully-green probe with its latency bounds", () => {
   const text = formatAllGreenThread([
-    {
+    makeEntry({
       signature: "v2/a",
-      label: "V2 · A",
       total: 9,
       passing: 9,
-      failing: 0,
-      yellowing: 0,
       p50Ms: 1000,
       p99Ms: 2000,
-      worstSeverity: "GREEN",
-      failures: [],
-      yellowOutcomes: [],
-    },
-    {
+    }),
+    makeEntry({
       signature: "v2/b",
-      label: "V2 · B",
       total: 7,
       passing: 7,
-      failing: 0,
-      yellowing: 0,
       p50Ms: 2500,
       p99Ms: 4000,
-      worstSeverity: "GREEN",
-      failures: [],
-      yellowOutcomes: [],
-    },
+    }),
   ]);
   expect(text).toContain("All-green probes (2)");
   expect(text).toMatch(/• 🟢 `v2\/a` — 9\/9 pass · p50 1000ms · p99 2000ms/);
@@ -322,7 +323,7 @@ it("summarize captures per-probe failure details for the threaded breakdown", ()
         }),
       ]),
     ],
-    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
+    NO_ARCHIVAL,
     NOW
   );
 
@@ -347,38 +348,38 @@ it("countMix produces a stable mostly-frequent-first tally", () => {
 });
 
 it("formatProbeFailureThread explains what N/M pass means for a red probe", () => {
-  const text = formatProbeFailureThread({
-    signature: "v1/llama3-70b",
-    label: "V1 · llama3-70b",
-    total: 8,
-    passing: 5,
-    failing: 3,
-    yellowing: 0,
-    p50Ms: 2804,
-    p99Ms: 3576,
-    worstSeverity: "RED",
-    yellowOutcomes: [],
-    failures: [
-      {
-        verdict: "FAIL",
-        httpStatus: 503,
-        durationMs: 2643,
-        completedAt: 1745000000,
-      },
-      {
-        verdict: "FAIL",
-        httpStatus: 503,
-        durationMs: 2700,
-        completedAt: 1745010000,
-      },
-      {
-        verdict: "FAIL",
-        httpStatus: null,
-        durationMs: 2800,
-        completedAt: 1745020000,
-      },
-    ],
-  });
+  const text = formatProbeFailureThread(
+    makeEntry({
+      signature: "v1/llama3-70b",
+      label: "V1 · llama3-70b",
+      total: 8,
+      passing: 5,
+      failing: 3,
+      p50Ms: 2804,
+      p99Ms: 3576,
+      worstSeverity: "RED",
+      failures: [
+        {
+          verdict: "FAIL",
+          httpStatus: 503,
+          durationMs: 2643,
+          completedAt: 1745000000,
+        },
+        {
+          verdict: "FAIL",
+          httpStatus: 503,
+          durationMs: 2700,
+          completedAt: 1745010000,
+        },
+        {
+          verdict: "FAIL",
+          httpStatus: null,
+          durationMs: 2800,
+          completedAt: 1745020000,
+        },
+      ],
+    })
+  );
 
   expect(text).toContain("*Breakdown for `v1/llama3-70b`*");
   expect(text).toContain("Runs in the weekly window: 8");
@@ -393,32 +394,33 @@ it("formatProbeFailureThread explains what N/M pass means for a red probe", () =
 });
 
 it("formatProbeYellowThread surfaces the soft-signal breakdown for a yellow probe", () => {
-  const text = formatProbeYellowThread({
-    signature: "v2/slow",
-    label: "V2 · slow",
-    total: 8,
-    passing: 6,
-    failing: 2,
-    yellowing: 2,
-    p50Ms: 4000,
-    p99Ms: 12000,
-    worstSeverity: "YELLOW",
-    failures: [],
-    yellowOutcomes: [
-      {
-        verdict: "PASS",
-        httpStatus: 200,
-        durationMs: 9500,
-        completedAt: 1745000000,
-      },
-      {
-        verdict: "PASS",
-        httpStatus: 200,
-        durationMs: 11500,
-        completedAt: 1745010000,
-      },
-    ],
-  });
+  const text = formatProbeYellowThread(
+    makeEntry({
+      signature: "v2/slow",
+      label: "V2 · slow",
+      total: 8,
+      passing: 6,
+      failing: 2,
+      yellowing: 2,
+      p50Ms: 4000,
+      p99Ms: 12000,
+      worstSeverity: "YELLOW",
+      yellowOutcomes: [
+        {
+          verdict: "PASS",
+          httpStatus: 200,
+          durationMs: 9500,
+          completedAt: 1745000000,
+        },
+        {
+          verdict: "PASS",
+          httpStatus: 200,
+          durationMs: 11500,
+          completedAt: 1745010000,
+        },
+      ],
+    })
+  );
   expect(text).toContain("*Breakdown for `v2/slow`*");
   expect(text).toContain("YELLOW signals: 2");
   expect(text).toContain("PASS × 2");
@@ -450,12 +452,9 @@ it("summarize filters outcomes whose signature is not in allowedSignatures", () 
     }),
   ]);
 
-  const summary = summarize(
-    [artifact],
-    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
-    NOW,
-    { allowedSignatures: new Set(["v2/model/gloo-a"]) }
-  );
+  const summary = summarize([artifact], NO_ARCHIVAL, NOW, {
+    allowedSignatures: new Set(["v2/model/gloo-a"]),
+  });
 
   // Only the one allowed outcome contributes.
   expect(summary.probesRun).toBe(1);
@@ -473,12 +472,9 @@ it("summarize leaves all outcomes in place when allowedSignatures is null (fail-
       verdict: "FAIL",
     }),
   ]);
-  const summary = summarize(
-    [artifact],
-    { objectCount: 0, oldestAgeDays: null, totalBytes: 0 },
-    NOW,
-    { allowedSignatures: null }
-  );
+  const summary = summarize([artifact], NO_ARCHIVAL, NOW, {
+    allowedSignatures: null,
+  });
   expect(summary.probesRun).toBe(2);
   expect(summary.severityCounts.RED).toBe(1);
 });

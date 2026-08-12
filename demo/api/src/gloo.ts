@@ -189,6 +189,18 @@ export function toMetrics(options: {
   };
 }
 
+/**
+ * One message shape for every upstream failure. The body is included but
+ * bounded: Gloo's error payloads are small, and an unbounded one would end up
+ * in a log line and in the ledger's `errorMessage` column.
+ */
+async function upstreamError(response: Response): Promise<Error> {
+  const detail = await response.text().catch(() => "");
+  return new Error(
+    `Gloo returned ${response.status}${detail ? `: ${detail.slice(0, 400)}` : ""}`
+  );
+}
+
 export type GlooClient = ReturnType<typeof createGlooClient>;
 
 export function createGlooClient(options: {
@@ -205,9 +217,7 @@ export function createGlooClient(options: {
       headers: {
         Authorization: `Bearer ${options.apiKey}`,
         "Content-Type": "application/json",
-        Accept: (body.stream
-          ? "text/event-stream"
-          : "application/json") as string,
+        Accept: body.stream ? "text/event-stream" : "application/json",
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
@@ -225,10 +235,7 @@ export function createGlooClient(options: {
         buildGlooBody({ messages, selection, stream: true })
       );
       if (!response.ok || !response.body) {
-        const detail = await response.text().catch(() => "");
-        throw new Error(
-          `Gloo returned ${response.status}${detail ? `: ${detail.slice(0, 400)}` : ""}`
-        );
+        throw await upstreamError(response);
       }
 
       const decoder = new TextDecoder();
@@ -261,10 +268,7 @@ export function createGlooClient(options: {
         buildGlooBody({ messages, selection, stream: false })
       );
       if (!response.ok) {
-        const detail = await response.text().catch(() => "");
-        throw new Error(
-          `Gloo returned ${response.status}${detail ? `: ${detail.slice(0, 400)}` : ""}`
-        );
+        throw await upstreamError(response);
       }
       const accumulator = createAccumulator();
       applyChunk(accumulator, await response.json());

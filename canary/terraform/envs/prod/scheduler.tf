@@ -1,12 +1,12 @@
 /**
  * Cloud Scheduler jobs that fire the Cloud Run Jobs on the cron windows:
- *   - probe     — once weekly on Monday at 06:00 CT
- *   - digest    — weekly on Monday at 06:15 CT (15 min after the probe, see variables.tf)
- *   - ingestion — every 6 hours (no AI token spend; see variables.tf)
+ *   - probe     - once weekly on Monday at 06:00 CT
+ *   - digest    - weekly on Monday at 06:15 CT (15 min after the probe, see variables.tf)
+ *   - ingestion - every 6 hours (no AI token spend; see variables.tf)
  *
  * Probe/digest were reduced from daily to weekly to minimize Cloud Run + AI
  * token spend. With full_sweep_interval_ms=3600000 (1h) and a 168h probe
- * cadence, every run triggers a Full sweep — all routing modes and direct
+ * cadence, every run triggers a Full sweep - all routing modes and direct
  * models exercised.
  *
  * Three scheduler jobs exactly fill the Cloud Scheduler free tier
@@ -55,7 +55,7 @@ resource "google_cloud_scheduler_job" "canary_probe" {
     }
   }
 
-  # retry_count = 3 — with a weekly cadence a transient invocation failure would
+  # retry_count = 3 - with a weekly cadence a transient invocation failure would
   # otherwise go undetected until next Monday. Three retries give the job
   # a fighting chance through brief GCP hiccups without burning budget.
   retry_config {
@@ -78,7 +78,7 @@ resource "google_cloud_scheduler_job" "canary_ingestion" {
   region      = var.region
   schedule    = var.ingestion_schedule_cron
   time_zone   = var.schedule_timezone
-  # Ships paused until the dedicated canary publisher is provisioned —
+  # Ships paused until the dedicated canary publisher is provisioned -
   # otherwise every tick would burn a doomed Cloud Run execution that
   # fails at config load. Setting ingestion_publisher_id un-pauses it
   # on the next apply.

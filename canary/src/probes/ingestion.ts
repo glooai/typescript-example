@@ -118,6 +118,200 @@ function parseJson(rawBody: string): unknown {
   }
 }
 
+function isSuccess(result: HttpResult): boolean {
+  return (
+    result.kind === "response" && result.status >= 200 && result.status < 300
+  );
+}
+
+type SubmitOutcome =
+  | { kind: "ok"; itemId: string; duplicate: boolean }
+  | { kind: "timeout" }
+  | { kind: "not-entitled"; preview: string }
+  | { kind: "no-item-id"; status: number; preview: string }
+  | { kind: "failed"; httpStatus: number | null; preview: string | undefined };
+
+type SubmitResult = SubmitOutcome & { attempts: number };
+
+type SubmitParams = {
+  publisherId: string;
+  authHeaders: Record<string, string>;
+  fileContent: string;
+  fileName: string;
+  requestTimeoutMs: number;
+  sleep: (ms: number) => Promise<void>;
+};
+
+/**
+ * Stage 1. Retries only transient failures (5xx / network); other 4xx
+ * shapes are contract failures a retry can't fix, and a 403 is a stable
+ * entitlement signal.
+ */
+async function submitFile(params: SubmitParams): Promise<SubmitResult> {
+  let failure: { httpStatus: number | null; preview: string } | null = null;
+  let attempts = 0;
+
+  for (let attempt = 1; attempt <= 1 + SUBMIT_RETRIES; attempt++) {
+    attempts = attempt;
+    // Rebuild the form per attempt - a FormData body is consumed by the
+    // fetch that sends it.
+    const form = new FormData();
+    form.append("publisher_id", params.publisherId);
+    form.append(
+      "files",
+      new File([params.fileContent], params.fileName, { type: "text/plain" })
+    );
+
+    const result = await request(
+      INGESTION_SUBMIT_URL,
+      { method: "POST", headers: params.authHeaders, body: form },
+      params.requestTimeoutMs
+    );
+
+    if (result.kind === "abort") return { kind: "timeout", attempts: attempt };
+
+    if (result.kind === "network-error") {
+      failure = { httpStatus: null, preview: result.message };
+      if (attempt <= SUBMIT_RETRIES) {
+        await params.sleep(SUBMIT_RETRY_BACKOFF_MS * attempt);
+      }
+      continue;
+    }
+
+    // 403 = missing `ingestion_access` entitlement or the publisher isn't
+    // owned by the canary client's org. Stable config signal.
+    if (result.status === 403) {
+      return {
+        kind: "not-entitled",
+        preview: result.rawBody.slice(0, 400),
+        attempts: attempt,
+      };
+    }
+
+    if (isSuccess(result)) {
+      const parsed = parseJson(result.rawBody) as {
+        ingesting?: unknown;
+        duplicates?: unknown;
+      } | null;
+      const ingesting = Array.isArray(parsed?.ingesting)
+        ? parsed.ingesting
+        : [];
+      const duplicates = Array.isArray(parsed?.duplicates)
+        ? parsed.duplicates
+        : [];
+      const fresh = typeof ingesting[0] === "string" ? ingesting[0] : null;
+      // Content-dedup collapsing our upload onto an existing item is
+      // survivable (same pipeline, same verification) - note it and carry
+      // on with the duplicate's id.
+      const dup = typeof duplicates[0] === "string" ? duplicates[0] : null;
+      const itemId = fresh ?? dup;
+      if (!itemId) {
+        return {
+          kind: "no-item-id",
+          status: result.status,
+          preview: result.rawBody.slice(0, 400),
+          attempts: attempt,
+        };
+      }
+      return {
+        kind: "ok",
+        itemId,
+        duplicate: !fresh && dup !== null,
+        attempts: attempt,
+      };
+    }
+
+    failure = {
+      httpStatus: result.status,
+      preview: result.rawBody.slice(0, 400),
+    };
+    if (result.status < 500) break;
+    if (attempt <= SUBMIT_RETRIES) {
+      await params.sleep(SUBMIT_RETRY_BACKOFF_MS * attempt);
+    }
+  }
+
+  return {
+    kind: "failed",
+    httpStatus: failure?.httpStatus ?? null,
+    preview: failure?.preview,
+    attempts,
+  };
+}
+
+type PollResult = {
+  outcome: "completed" | "failed" | "sla";
+  lastStatus: string | null;
+  statusHistory: Array<{ status: string; tMs: number }>;
+  pollErrors: number;
+  processingMs: number;
+};
+
+/**
+ * Stage 2. Transient poll failures (5xx blips, network errors, our own
+ * per-request aborts, an eventual-consistency 404 right after submit) don't
+ * fail the probe - the SLA budget is the judge.
+ */
+async function pollUntilTerminal(params: {
+  itemId: string;
+  authHeaders: Record<string, string>;
+  requestTimeoutMs: number;
+  slaMs: number;
+  pollIntervalMs: number;
+  sleep: (ms: number) => Promise<void>;
+}): Promise<PollResult> {
+  const start = Date.now();
+  const statusHistory: Array<{ status: string; tMs: number }> = [];
+  let lastStatus: string | null = null;
+  let pollErrors = 0;
+  let outcome: PollResult["outcome"] = "sla";
+
+  for (;;) {
+    const result = await request(
+      itemStatusUrl(params.itemId),
+      { method: "GET", headers: params.authHeaders },
+      params.requestTimeoutMs
+    );
+
+    const parsed =
+      result.kind === "response" && isSuccess(result)
+        ? (parseJson(result.rawBody) as { status?: unknown } | null)
+        : null;
+    const status = typeof parsed?.status === "string" ? parsed.status : null;
+
+    if (status === null) {
+      pollErrors++;
+    } else {
+      if (status !== lastStatus) {
+        statusHistory.push({ status, tMs: Date.now() - start });
+      }
+      lastStatus = status;
+      if (status === STATUS_COMPLETED) {
+        outcome = "completed";
+        break;
+      }
+      if (status === STATUS_FAILED) {
+        outcome = "failed";
+        break;
+      }
+    }
+
+    if (Date.now() - start >= params.slaMs) {
+      outcome = "sla";
+      break;
+    }
+    await params.sleep(params.pollIntervalMs);
+  }
+
+  return {
+    outcome,
+    lastStatus,
+    statusHistory,
+    pollErrors,
+    processingMs: Date.now() - start,
+  };
+}
+
 export function buildIngestionProbe(fixture: IngestionFixture): Probe {
   const slaMs = fixture.slaMs ?? DEFAULT_SLA_MS;
   const pollIntervalMs = fixture.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -161,188 +355,87 @@ export function buildIngestionProbe(fixture: IngestionFixture): Probe {
         completedAt: Math.floor(Date.now() / 1000),
       });
 
-      // ── Stage 1: submit ─────────────────────────────────────────────
       const sentinel = buildSentinel(ctx.runId);
-      const fileContent = [
-        `Gloo AI ingestion canary. ${sentinel}.`,
-        "This document verifies the Data Engine ingestion pipeline end to end",
-        "(submit, chunk, embed, retrieve) and is deleted by the probe on completion.",
-      ].join("\n");
-      const fileName = `gloo-canary-${ctx.runId.replace(/[^a-zA-Z0-9_-]/g, "_")}.txt`;
+      const submit = await submitFile({
+        publisherId: fixture.publisherId,
+        authHeaders,
+        fileContent: [
+          `Gloo AI ingestion canary. ${sentinel}.`,
+          "This document verifies the Data Engine ingestion pipeline end to end",
+          "(submit, chunk, embed, retrieve) and is deleted by the probe on completion.",
+        ].join("\n"),
+        fileName: `gloo-canary-${ctx.runId.replace(/[^a-zA-Z0-9_-]/g, "_")}.txt`,
+        requestTimeoutMs,
+        sleep,
+      });
+      const submitAttempts = submit.attempts;
 
-      let submitAttempts = 0;
-      let submitFailure: { httpStatus: number | null; preview: string } | null =
-        null;
-      let itemId: string | null = null;
-
-      for (let attempt = 1; attempt <= 1 + SUBMIT_RETRIES; attempt++) {
-        submitAttempts = attempt;
-        // Rebuild the form per attempt — a FormData body is consumed by
-        // the fetch that sends it.
-        const form = new FormData();
-        form.append("publisher_id", fixture.publisherId);
-        form.append(
-          "files",
-          new File([fileContent], fileName, { type: "text/plain" })
-        );
-
-        const result = await request(
-          INGESTION_SUBMIT_URL,
-          { method: "POST", headers: authHeaders, body: form },
-          requestTimeoutMs
-        );
-
-        if (result.kind === "abort") {
-          return finish({
-            verdict: "TIMEOUT",
-            severity: "YELLOW",
-            endpoint: INGESTION_SUBMIT_URL,
-            httpStatus: null,
-            details: {
-              stage: "submit",
-              timeoutMs: requestTimeoutMs,
-              submitAttempts,
-            },
-          });
-        }
-
-        if (result.kind === "network-error") {
-          submitFailure = { httpStatus: null, preview: result.message };
-          if (attempt <= SUBMIT_RETRIES)
-            await sleep(SUBMIT_RETRY_BACKOFF_MS * attempt);
-          continue;
-        }
-
-        // 403 = missing `ingestion_access` entitlement or the publisher
-        // isn't owned by the canary client's org. Stable config signal —
-        // don't retry, don't page.
-        if (result.status === 403) {
-          return finish({
-            verdict: "NOT_ENTITLED",
-            severity: "YELLOW",
-            endpoint: INGESTION_SUBMIT_URL,
-            httpStatus: 403,
-            responsePreview: result.rawBody.slice(0, 400),
-            details: { stage: "submit", submitAttempts },
-          });
-        }
-
-        if (result.status >= 200 && result.status < 300) {
-          const parsed = parseJson(result.rawBody) as {
-            ingesting?: unknown;
-            duplicates?: unknown;
-          } | null;
-          const ingesting = Array.isArray(parsed?.ingesting)
-            ? parsed.ingesting
-            : [];
-          const duplicates = Array.isArray(parsed?.duplicates)
-            ? parsed.duplicates
-            : [];
-          const fresh = typeof ingesting[0] === "string" ? ingesting[0] : null;
-          // Content-dedup collapsing our upload onto an existing item is
-          // survivable (same pipeline, same verification) — note it and
-          // carry on with the duplicate's id.
-          const dup = typeof duplicates[0] === "string" ? duplicates[0] : null;
-          itemId = fresh ?? dup;
-          if (!itemId) {
-            return finish({
-              verdict: "SCHEMA_MISMATCH",
-              severity: "RED",
-              endpoint: INGESTION_SUBMIT_URL,
-              httpStatus: result.status,
-              responsePreview: result.rawBody.slice(0, 400),
-              details: {
-                stage: "submit",
-                reason: "no-item-id-in-response",
-                submitAttempts,
-              },
-            });
-          }
-          sharedDetails.itemId = itemId;
-          sharedDetails.submitAttempts = submitAttempts;
-          if (!fresh && dup) sharedDetails.duplicate = true;
-          break;
-        }
-
-        submitFailure = {
-          httpStatus: result.status,
-          preview: result.rawBody.slice(0, 400),
-        };
-        // Only 5xx is plausibly transient; other 4xx shapes are contract
-        // failures that a retry can't fix.
-        if (result.status < 500) break;
-        if (attempt <= SUBMIT_RETRIES)
-          await sleep(SUBMIT_RETRY_BACKOFF_MS * attempt);
+      if (submit.kind === "timeout") {
+        return finish({
+          verdict: "TIMEOUT",
+          severity: "YELLOW",
+          endpoint: INGESTION_SUBMIT_URL,
+          httpStatus: null,
+          details: {
+            stage: "submit",
+            timeoutMs: requestTimeoutMs,
+            submitAttempts,
+          },
+        });
       }
-
-      if (!itemId) {
+      if (submit.kind === "not-entitled") {
+        return finish({
+          verdict: "NOT_ENTITLED",
+          severity: "YELLOW",
+          endpoint: INGESTION_SUBMIT_URL,
+          httpStatus: 403,
+          responsePreview: submit.preview,
+          details: { stage: "submit", submitAttempts },
+        });
+      }
+      if (submit.kind === "no-item-id") {
+        return finish({
+          verdict: "SCHEMA_MISMATCH",
+          severity: "RED",
+          endpoint: INGESTION_SUBMIT_URL,
+          httpStatus: submit.status,
+          responsePreview: submit.preview,
+          details: {
+            stage: "submit",
+            reason: "no-item-id-in-response",
+            submitAttempts,
+          },
+        });
+      }
+      if (submit.kind === "failed") {
         return finish({
           verdict: "FAIL",
           severity: "RED",
           endpoint: INGESTION_SUBMIT_URL,
-          httpStatus: submitFailure?.httpStatus ?? null,
-          responsePreview: submitFailure?.preview,
+          httpStatus: submit.httpStatus,
+          responsePreview: submit.preview,
           details: { stage: "submit", reason: "submit-failed", submitAttempts },
         });
       }
 
-      // ── Stage 2: poll processing status until terminal or SLA ──────
-      const processingStart = Date.now();
-      const statusHistory: Array<{ status: string; tMs: number }> = [];
-      let lastStatus: string | null = null;
-      let pollErrors = 0;
-      let processingOutcome: "completed" | "failed" | "sla" = "sla";
+      const itemId = submit.itemId;
+      sharedDetails.itemId = itemId;
+      sharedDetails.submitAttempts = submitAttempts;
+      if (submit.duplicate) sharedDetails.duplicate = true;
 
-      for (;;) {
-        const result = await request(
-          itemStatusUrl(itemId),
-          { method: "GET", headers: authHeaders },
-          requestTimeoutMs
-        );
-
-        if (
-          result.kind === "response" &&
-          result.status >= 200 &&
-          result.status < 300
-        ) {
-          const parsed = parseJson(result.rawBody) as {
-            status?: unknown;
-          } | null;
-          const status =
-            typeof parsed?.status === "string" ? parsed.status : null;
-          if (status) {
-            if (status !== lastStatus) {
-              statusHistory.push({ status, tMs: Date.now() - processingStart });
-            }
-            lastStatus = status;
-            if (status === STATUS_COMPLETED) {
-              processingOutcome = "completed";
-              break;
-            }
-            if (status === STATUS_FAILED) {
-              processingOutcome = "failed";
-              break;
-            }
-          } else {
-            pollErrors++;
-          }
-        } else {
-          // Transient poll failures (5xx blips, network errors, our own
-          // per-request aborts, an eventual-consistency 404 right after
-          // submit) don't fail the probe — the SLA budget is the judge.
-          pollErrors++;
-        }
-
-        if (Date.now() - processingStart >= slaMs) {
-          processingOutcome = "sla";
-          break;
-        }
-        await sleep(pollIntervalMs);
-      }
+      const processing = await pollUntilTerminal({
+        itemId,
+        authHeaders,
+        requestTimeoutMs,
+        slaMs,
+        pollIntervalMs,
+        sleep,
+      });
+      const { lastStatus, statusHistory } = processing;
 
       sharedDetails.statusHistory = statusHistory;
-      sharedDetails.pollErrors = pollErrors;
-      sharedDetails.processingMs = Date.now() - processingStart;
+      sharedDetails.pollErrors = processing.pollErrors;
+      sharedDetails.processingMs = processing.processingMs;
 
       // ── Stage 4 (early): best-effort cleanup for failure paths ─────
       // Deleting the item is attempted on EVERY path once an id exists —
@@ -357,14 +450,10 @@ export function buildIngestionProbe(fixture: IngestionFixture): Probe {
           },
           requestTimeoutMs
         );
-        return result.kind === "response" &&
-          result.status >= 200 &&
-          result.status < 300
-          ? "ok"
-          : "failed";
+        return isSuccess(result) ? "ok" : "failed";
       };
 
-      if (processingOutcome === "failed") {
+      if (processing.outcome === "failed") {
         sharedDetails.cleanup = await cleanup();
         return finish({
           verdict: "FAIL",
@@ -379,7 +468,7 @@ export function buildIngestionProbe(fixture: IngestionFixture): Probe {
         });
       }
 
-      if (processingOutcome === "sla") {
+      if (processing.outcome === "sla") {
         sharedDetails.cleanup = await cleanup();
         return finish({
           verdict: "SLA_EXCEEDED",
@@ -398,11 +487,7 @@ export function buildIngestionProbe(fixture: IngestionFixture): Probe {
         requestTimeoutMs
       );
 
-      if (
-        verifyResult.kind !== "response" ||
-        verifyResult.status < 200 ||
-        verifyResult.status >= 300
-      ) {
+      if (verifyResult.kind !== "response" || !isSuccess(verifyResult)) {
         sharedDetails.cleanup = await cleanup();
         return finish({
           verdict: "FAIL",

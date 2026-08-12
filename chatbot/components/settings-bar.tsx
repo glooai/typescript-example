@@ -9,6 +9,14 @@ export type ChatSettings = {
   model: string;
 };
 
+type Option = { value: string; label: string };
+
+const ROUTING_MODES: Option[] = [
+  { value: "ai_core", label: "AI Core (Auto)" },
+  { value: "ai_core_select", label: "AI Core Select" },
+  { value: "ai_select", label: "AI Select" },
+];
+
 const MODEL_FAMILIES = [
   { value: "openai", label: "OpenAI" },
   { value: "anthropic", label: "Anthropic" },
@@ -30,6 +38,35 @@ const MODELS = [
   { value: "gloo-deepseek-v3.2", label: "DeepSeek V3.2" },
 ];
 
+function SettingSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Option[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex items-center gap-1.5">
+      <span className="font-medium text-gray-600">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-lg border border-gray-300 bg-gray-50 px-2.5 py-1.5 text-sm"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function SettingsBar({
   settings,
   onChange,
@@ -39,74 +76,39 @@ export function SettingsBar({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-2.5 shadow-sm text-sm">
-      <label className="flex items-center gap-1.5">
-        <span className="font-medium text-gray-600">Routing</span>
-        <select
-          value={settings.routingMode}
-          onChange={(e) =>
-            onChange({
-              ...settings,
-              routingMode: e.target.value as RoutingMode,
-            })
-          }
-          className="rounded-lg border border-gray-300 bg-gray-50 px-2.5 py-1.5 text-sm"
-        >
-          <option value="ai_core">AI Core (Auto)</option>
-          <option value="ai_core_select">AI Core Select</option>
-          <option value="ai_select">AI Select</option>
-        </select>
-      </label>
+      <SettingSelect
+        label="Routing"
+        value={settings.routingMode}
+        options={ROUTING_MODES}
+        onChange={(routingMode) =>
+          onChange({ ...settings, routingMode: routingMode as RoutingMode })
+        }
+      />
 
       {settings.routingMode === "ai_core_select" && (
-        <label className="flex items-center gap-1.5">
-          <span className="font-medium text-gray-600">Provider</span>
-          <select
-            value={settings.modelFamily}
-            onChange={(e) =>
-              onChange({ ...settings, modelFamily: e.target.value })
-            }
-            className="rounded-lg border border-gray-300 bg-gray-50 px-2.5 py-1.5 text-sm"
-          >
-            {MODEL_FAMILIES.map((f) => (
-              <option key={f.value} value={f.value}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SettingSelect
+          label="Provider"
+          value={settings.modelFamily}
+          options={MODEL_FAMILIES}
+          onChange={(modelFamily) => onChange({ ...settings, modelFamily })}
+        />
       )}
 
       {settings.routingMode === "ai_select" && (
-        <label className="flex items-center gap-1.5">
-          <span className="font-medium text-gray-600">Model</span>
-          <select
-            value={settings.model}
-            onChange={(e) => onChange({ ...settings, model: e.target.value })}
-            className="rounded-lg border border-gray-300 bg-gray-50 px-2.5 py-1.5 text-sm"
-          >
-            {MODELS.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SettingSelect
+          label="Model"
+          value={settings.model}
+          options={MODELS}
+          onChange={(model) => onChange({ ...settings, model })}
+        />
       )}
 
-      <label className="flex items-center gap-1.5">
-        <span className="font-medium text-gray-600">Tradition</span>
-        <select
-          value={settings.tradition}
-          onChange={(e) => onChange({ ...settings, tradition: e.target.value })}
-          className="rounded-lg border border-gray-300 bg-gray-50 px-2.5 py-1.5 text-sm"
-        >
-          {TRADITIONS.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <SettingSelect
+        label="Tradition"
+        value={settings.tradition}
+        options={TRADITIONS}
+        onChange={(tradition) => onChange({ ...settings, tradition })}
+      />
     </div>
   );
 }

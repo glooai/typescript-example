@@ -63,6 +63,27 @@ function mean(values: number[]): number {
   return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
+/** Mean of the last `window` values, or null when there are none yet. */
+function trailingMean(values: number[], window: number): number | null {
+  if (values.length === 0) {
+    return null;
+  }
+  return mean(values.slice(Math.max(0, values.length - window)));
+}
+
+function spanMs(rows: LedgerRow[]): number {
+  if (rows.length === 0) {
+    return 0;
+  }
+  const times = rows.map((row) => Date.parse(row.timestamp));
+  return Math.max(...times) - Math.min(...times);
+}
+
+/** Spend across the priced calls; an unpriced one contributes nothing. */
+function totalCost(rows: LedgerRow[]): number {
+  return rows.reduce((total, row) => total + (row.costUsd ?? 0), 0);
+}
+
 /**
  * Trailing simple moving average. The first points average over whatever
  * history exists rather than being dropped, so a series of three calls still
@@ -108,13 +129,10 @@ export function buildCallSeries(rows: LedgerRow[]): CallPoint[] {
   // held flat across a gap rather than dipping through it.
   const priced: number[] = [];
   const rollingCost = ordered.map((row) => {
-    if (row.costUsd === null) {
-      return priced.length === 0
-        ? null
-        : mean(priced.slice(Math.max(0, priced.length - window)));
+    if (row.costUsd !== null) {
+      priced.push(row.costUsd);
     }
-    priced.push(row.costUsd);
-    return mean(priced.slice(Math.max(0, priced.length - window)));
+    return trailingMean(priced, window);
   });
 
   return ordered.map((row, index) => ({
@@ -151,12 +169,7 @@ function nextBucket(start: number, granularity: BucketGranularity): number {
 }
 
 export function chooseGranularity(rows: LedgerRow[]): BucketGranularity {
-  if (rows.length === 0) {
-    return "hour";
-  }
-  const times = rows.map((row) => Date.parse(row.timestamp));
-  const span = Math.max(...times) - Math.min(...times);
-  return span > HOURLY_SPAN_LIMIT_MS ? "day" : "hour";
+  return spanMs(rows) > HOURLY_SPAN_LIMIT_MS ? "day" : "hour";
 }
 
 /**
@@ -200,7 +213,7 @@ export function bucketRows(
       calls: inBucket.length,
       errors: inBucket.length - ok.length,
       avgLatencyMs: Math.round(mean(ok.map((row) => row.latencyMs))),
-      costUsd: ok.reduce((total, row) => total + (row.costUsd ?? 0), 0),
+      costUsd: totalCost(ok),
     });
   }
 
@@ -216,8 +229,6 @@ export function summarise(rows: LedgerRow[]): LedgerSummary {
   const latencies = ok.map((row) => row.latencyMs).sort((a, b) => a - b);
   const middle = Math.floor(latencies.length / 2);
 
-  const times = rows.map((row) => Date.parse(row.timestamp));
-
   return {
     calls: rows.length,
     errors: rows.length - ok.length,
@@ -228,7 +239,7 @@ export function summarise(rows: LedgerRow[]): LedgerSummary {
         : latencies.length % 2 === 1
           ? latencies[middle]
           : Math.round((latencies[middle - 1] + latencies[middle]) / 2),
-    totalCostUsd: ok.reduce((total, row) => total + (row.costUsd ?? 0), 0),
-    spanMs: times.length === 0 ? 0 : Math.max(...times) - Math.min(...times),
+    totalCostUsd: totalCost(ok),
+    spanMs: spanMs(rows),
   };
 }

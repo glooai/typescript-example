@@ -79,7 +79,6 @@ async function runKeyCheck(): Promise<void> {
     console.log(`  scope: ${decoded.scope}`);
   }
 
-  // Display any other claims
   const standardClaims = new Set([
     "client_id",
     "sub",
@@ -96,7 +95,6 @@ async function runKeyCheck(): Promise<void> {
     }
   }
 
-  // Organization ID validation
   const orgId = decoded.org_id as string | undefined;
 
   console.log("\nOrganization Check:");

@@ -1,29 +1,36 @@
-import { streamText, convertToModelMessages, type JSONValue } from "ai";
+import {
+  streamText,
+  convertToModelMessages,
+  type JSONValue,
+  type UIMessage,
+} from "ai";
 import { gloo } from "@/lib/gloo-provider";
+import type { ChatSettings } from "@/components/settings-bar";
 
 export const maxDuration = 60;
 
+type ChatRequest = Partial<ChatSettings> & { messages: UIMessage[] };
+
 export async function POST(req: Request) {
   const { messages, routingMode, modelFamily, tradition, model } =
-    await req.json();
+    (await req.json()) as ChatRequest;
 
   const modelMessages = await convertToModelMessages(messages);
 
-  // Build Gloo-specific body params based on routing mode
   const glooParams: Record<string, JSONValue> = {};
 
   switch (routingMode) {
     case "ai_core_select":
-      // AI Core Select — specify provider family, Gloo picks the model
+      // Caller picks the provider family, Gloo picks the model within it.
       glooParams.auto_routing = false;
       glooParams.model_family = modelFamily || "openai";
       break;
     case "ai_select":
-      // AI Select — caller specifies exact model
+      // Caller picks the exact model.
       glooParams.auto_routing = false;
       break;
     default:
-      // AI Core — auto-routing (recommended)
+      // AI Core: Gloo routes on its own.
       glooParams.auto_routing = true;
       break;
   }

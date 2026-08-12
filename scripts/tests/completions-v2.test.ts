@@ -7,11 +7,7 @@ import {
   type CompletionsV2Request,
   type CompletionsV2Response,
 } from "../src/completions-v2.js";
-
-type FetchCall = {
-  url?: string | URL | Request;
-  init?: RequestInit;
-};
+import { type FetchCall } from "./helpers.js";
 
 afterEach(() => {
   vi.restoreAllMocks();

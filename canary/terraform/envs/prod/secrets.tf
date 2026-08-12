@@ -1,6 +1,6 @@
 /**
  * Secret Manager entries for the canary. Values are populated out-of-band
- * via `gcloud secrets versions add` — Terraform manages the secret metadata
+ * via `gcloud secrets versions add` - Terraform manages the secret metadata
  * + IAM, not the payloads. This keeps secret rotation independent of code
  * deploys and keeps raw values out of tfstate.
  */
@@ -10,7 +10,7 @@ locals {
     "gloo-ai-canary-api-key"  = "Dedicated Gloo AI canary WorkOS API key."
     "alerts-slack-bot-token"  = "Slack xoxb- bot token for posting alerts."
     "alerts-slack-channel-id" = "Target Slack channel ID (e.g. C0AU2FM2Q86)."
-    # Better Stack heartbeat URLs (token embedded in the URL — hence
+    # Better Stack heartbeat URLs (token embedded in the URL - hence
     # Secret Manager, not plain env). One monitor per status-page
     # component. Jobs only mount these when heartbeats_enabled=true:
     # Cloud Run refuses to start a job that references a secret with

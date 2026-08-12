@@ -1,34 +1,13 @@
-import { expect, it, vi, beforeEach, afterEach } from "vitest";
+import { expect, it, vi } from "vitest";
 import * as itemsModule from "../src/items.js";
+import { mockFetch, restoreEnvAndMocks, type FetchCall } from "./helpers.js";
 
 vi.mock("node:fs/promises", () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),
   writeFile: vi.fn().mockResolvedValue(undefined),
 }));
 
-type FetchCall = {
-  url?: string | URL | Request;
-  init?: RequestInit;
-};
-
-const originalEnv = { ...process.env };
-
-const mockFetch = (payload: unknown, status = 200): Promise<Response> =>
-  Promise.resolve(
-    new Response(JSON.stringify(payload), {
-      status,
-      headers: { "Content-Type": "application/json" },
-    })
-  );
-
-beforeEach(() => {
-  process.env = { ...originalEnv };
-});
-
-afterEach(() => {
-  process.env = { ...originalEnv };
-  vi.restoreAllMocks();
-});
+restoreEnvAndMocks();
 
 it("sends GET request with correct URL and authorization", async () => {
   const calls: FetchCall = {};

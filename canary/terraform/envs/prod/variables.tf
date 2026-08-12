@@ -39,7 +39,7 @@ variable "probe_schedule_cron" {
 variable "digest_schedule_cron" {
   description = "Digest-job cron expression (America/Chicago timezone)."
   type        = string
-  # 06:15 CT Monday — 15 minutes after the 06:00 probe. A full sweep with
+  # 06:15 CT Monday - 15 minutes after the 06:00 probe. A full sweep with
   # direct-model + family + routing probes takes up to ~10 min end-to-end
   # (OAuth → per-probe HTTP → GCS write). The previous 5-min gap was too
   # tight: the digest's loadWindow query fired before the probe's GCS write
@@ -51,10 +51,10 @@ variable "digest_schedule_cron" {
 variable "ingestion_schedule_cron" {
   description = "Ingestion-canary cron expression (America/Chicago timezone)."
   type        = string
-  # Every 6 hours — the Platform Health project promises ingestion status
+  # Every 6 hours - the Platform Health project promises ingestion status
   # "multiple times per day". Unlike the inference probes (dialed to weekly
-  # for AI token spend), an ingestion run costs no completion tokens — just
-  # one tiny file through the pipeline — so a 4x/day cadence is cheap.
+  # for AI token spend), an ingestion run costs no completion tokens - just
+  # one tiny file through the pipeline - so a 4x/day cadence is cheap.
   default = "30 */6 * * *"
 }
 
@@ -62,7 +62,7 @@ variable "ingestion_publisher_id" {
   description = <<-EOT
     Dedicated canary publisher for the ingestion E2E probe. Must belong to
     the canary OAuth client's organization, and that org must hold the
-    `ingestion_access` entitlement. Leave empty until provisioned — the
+    `ingestion_access` entitlement. Leave empty until provisioned - the
     ingestion job then exits non-zero at config load (a loud failure in
     Cloud Run logs) rather than probing the wrong publisher.
   EOT
@@ -75,7 +75,7 @@ variable "heartbeats_enabled" {
     Mount the Better Stack heartbeat URLs (CANARY_HEARTBEAT_URL) into the
     probe + ingestion jobs. Leave false until BOTH heartbeat secrets have a
     version (`gcloud secrets versions add canary-heartbeat-url-probe /
-    canary-heartbeat-url-ingestion`) — Cloud Run refuses to start a job
+    canary-heartbeat-url-ingestion`) - Cloud Run refuses to start a job
     that references a versionless secret. With the env absent the canary
     code no-ops the heartbeat, so flipping this is purely additive.
   EOT
@@ -116,5 +116,5 @@ variable "full_sweep_interval_ms" {
     force Full regardless of interval.
   EOT
   type        = number
-  default     = 3600000 # 1 hour — every weekly probe triggers a Full sweep
+  default     = 3600000 # 1 hour - every weekly probe triggers a Full sweep
 }

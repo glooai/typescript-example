@@ -12,7 +12,7 @@ import {
   runDigest,
 } from "../../src/runners/digest-runner.js";
 import type { CanaryConfig } from "../../src/config.js";
-import type { Probe } from "../../src/probes/types.js";
+import type { Probe, ProbeOutcome } from "../../src/probes/types.js";
 import type { GcsClient, RunArtifact } from "../../src/sinks/gcs.js";
 import type { SlackClient } from "../../src/sinks/slack.js";
 
@@ -26,6 +26,35 @@ const CONFIG: CanaryConfig = {
     startedAt: "2026-04-20T18:00:00Z",
   },
 };
+
+const NOW = new Date("2026-04-20T18:00:00Z");
+
+function makeOutcome(partial: Partial<ProbeOutcome> = {}): ProbeOutcome {
+  return {
+    signature: "v2/auto",
+    label: "V2 · auto",
+    endpoint: "u",
+    apiVersion: "v2",
+    httpStatus: 200,
+    verdict: "PASS",
+    severity: "GREEN",
+    durationMs: 1000,
+    details: {},
+    completedAt: 1700000000,
+    ...partial,
+  };
+}
+
+/** A probe that always returns `outcome`, so runner tests need no network. */
+function stubProbe(outcome: ProbeOutcome): Probe {
+  return {
+    signature: outcome.signature,
+    label: outcome.label,
+    async run() {
+      return outcome;
+    },
+  };
+}
 
 function fakeGcs(overrides?: {
   files?: Record<string, unknown>;
@@ -81,31 +110,25 @@ afterEach(() => {
 });
 
 it("runProbes executes each probe, archives, and alerts on RED", async () => {
-  const probe: Probe = {
-    signature: "v1/test",
-    label: "V1 · test",
-    async run() {
-      return {
-        signature: "v1/test",
-        label: "V1 · test",
-        endpoint: "https://example.com",
-        apiVersion: "v1",
-        httpStatus: 500,
-        verdict: "FAIL",
-        severity: "RED",
-        durationMs: 100,
-        details: {},
-        completedAt: 1700000000,
-      };
-    },
-  };
+  const probe = stubProbe(
+    makeOutcome({
+      signature: "v1/test",
+      label: "V1 · test",
+      endpoint: "https://example.com",
+      apiVersion: "v1",
+      httpStatus: 500,
+      verdict: "FAIL",
+      severity: "RED",
+      durationMs: 100,
+    })
+  );
   const gcs = fakeGcs();
   const slack = fakeSlack();
 
   const artifact = await runProbes(
     CONFIG,
     { probes: [probe], gcs, slack },
-    new Date("2026-04-20T18:00:00Z")
+    NOW
   );
 
   expect(artifact.outcomes).toHaveLength(1);
@@ -143,7 +166,7 @@ it("loadWindow walks GCS prefixes and returns run artifacts sorted by startedAt"
     list: Object.keys(files),
   });
 
-  const artifacts = await loadWindow(gcs, new Date("2026-04-20T18:00:00Z"));
+  const artifacts = await loadWindow(gcs, NOW);
   expect(artifacts.map((a) => a.runId)).toEqual(["run-a", "run-b"]);
 });
 
@@ -187,10 +210,7 @@ it("gatherArchivalState reports object count, bytes, and oldest age", async () =
   };
   const gcs = fakeGcs({ files, list: Object.keys(files) });
 
-  const state = await gatherArchivalState(
-    gcs,
-    new Date("2026-04-20T18:00:00Z")
-  );
+  const state = await gatherArchivalState(gcs, NOW);
   expect(state.objectCount).toBe(2);
   expect(state.totalBytes).toBe(1024);
   expect(state.oldestAgeDays).toBeGreaterThanOrEqual(19);
@@ -206,42 +226,20 @@ it("runDigest posts individualized YELLOW threads instead of a batch insights po
     startedAt: "2026-04-20T06:00:00Z",
     completedAt: "2026-04-20T06:00:30Z",
     outcomes: [
-      {
+      makeOutcome({ signature: "v2/slow", label: "V2 · slow" }),
+      makeOutcome({
         signature: "v2/slow",
         label: "V2 · slow",
-        endpoint: "u",
-        apiVersion: "v2",
-        httpStatus: 200,
-        verdict: "PASS",
-        severity: "GREEN",
-        durationMs: 1000,
-        details: {},
-        completedAt: 1700000000,
-      },
-      {
-        signature: "v2/slow",
-        label: "V2 · slow",
-        endpoint: "u",
-        apiVersion: "v2",
-        httpStatus: 200,
-        verdict: "PASS",
         severity: "YELLOW",
         durationMs: 9500,
         details: { note: "latency spike" },
-        completedAt: 1700000000,
-      },
-      {
+      }),
+      makeOutcome({
         signature: "v2/fast",
         label: "V2 · fast",
-        endpoint: "u",
-        apiVersion: "v2",
-        httpStatus: 200,
-        verdict: "PASS",
-        severity: "GREEN",
         durationMs: 400,
-        details: {},
         completedAt: 1700000050,
-      },
+      }),
     ],
   };
 
@@ -251,11 +249,7 @@ it("runDigest posts individualized YELLOW threads instead of a batch insights po
   });
   const slack = fakeSlack();
 
-  const summary = await runDigest(
-    CONFIG,
-    { gcs, slack },
-    new Date("2026-04-20T18:00:00Z")
-  );
+  const summary = await runDigest(CONFIG, { gcs, slack }, NOW);
 
   expect(summary.probesRun).toBe(3);
   expect(summary.severityCounts.YELLOW).toBe(1);
@@ -284,20 +278,7 @@ it("runDigest posts a single all-green thread reply when every probe is GREEN", 
     runId: "r",
     startedAt: "2026-04-20T06:00:00Z",
     completedAt: "2026-04-20T06:00:30Z",
-    outcomes: [
-      {
-        signature: "v2/auto",
-        label: "V2 · auto",
-        endpoint: "u",
-        apiVersion: "v2",
-        httpStatus: 200,
-        verdict: "PASS",
-        severity: "GREEN",
-        durationMs: 1000,
-        details: {},
-        completedAt: 1700000000,
-      },
-    ],
+    outcomes: [makeOutcome({ signature: "v2/auto", label: "V2 · auto" })],
   };
 
   const gcs = fakeGcs({
@@ -306,7 +287,7 @@ it("runDigest posts a single all-green thread reply when every probe is GREEN", 
   });
   const slack = fakeSlack();
 
-  await runDigest(CONFIG, { gcs, slack }, new Date("2026-04-20T18:00:00Z"));
+  await runDigest(CONFIG, { gcs, slack }, NOW);
   // Top-level post + single all-green roll-up in thread.
   expect(slack.posts).toHaveLength(2);
   expect(slack.posts[0].text).toContain("All probes fully green");
@@ -322,42 +303,25 @@ it("runDigest posts one individualized threaded breakdown per red probe and roll
     startedAt: "2026-04-20T06:00:00Z",
     completedAt: "2026-04-20T06:00:30Z",
     outcomes: [
-      {
-        signature: "v2/auto",
-        label: "V2 · auto",
-        endpoint: "u",
-        apiVersion: "v2",
-        httpStatus: 200,
-        verdict: "PASS",
-        severity: "GREEN",
-        durationMs: 1000,
-        details: {},
-        completedAt: 1700000000,
-      },
-      {
+      makeOutcome({ signature: "v2/auto", label: "V2 · auto" }),
+      makeOutcome({
         signature: "v1/bad",
         label: "V1 · bad",
-        endpoint: "u",
         apiVersion: "v1",
         httpStatus: 503,
         verdict: "FAIL",
         severity: "RED",
         durationMs: 2643,
-        details: {},
         completedAt: 1700000100,
-      },
-      {
+      }),
+      makeOutcome({
         signature: "v2/meh",
         label: "V2 · meh",
-        endpoint: "u",
-        apiVersion: "v2",
-        httpStatus: 200,
         verdict: "EMPTY_COMPLETION",
         severity: "RED",
         durationMs: 4000,
-        details: {},
         completedAt: 1700000200,
-      },
+      }),
     ],
   };
 
@@ -367,7 +331,7 @@ it("runDigest posts one individualized threaded breakdown per red probe and roll
   });
   const slack = fakeSlack();
 
-  await runDigest(CONFIG, { gcs, slack }, new Date("2026-04-20T18:00:00Z"));
+  await runDigest(CONFIG, { gcs, slack }, NOW);
 
   // 1 top-level + 1 all-green thread + 2 RED thread replies.
   expect(slack.posts).toHaveLength(4);
@@ -395,24 +359,9 @@ it("runDigest posts one individualized threaded breakdown per red probe and roll
 });
 
 it("runProbes attaches registryDelta to the artifact when v2Models are provided and the GCS snapshot is missing (first-snapshot case)", async () => {
-  const probe: Probe = {
-    signature: "v2/noop",
-    label: "V2 · noop",
-    async run() {
-      return {
-        signature: "v2/noop",
-        label: "V2 · noop",
-        endpoint: "u",
-        apiVersion: "v2",
-        httpStatus: 200,
-        verdict: "PASS",
-        severity: "GREEN",
-        durationMs: 10,
-        details: {},
-        completedAt: 1700000000,
-      };
-    },
-  };
+  const probe = stubProbe(
+    makeOutcome({ signature: "v2/noop", label: "V2 · noop", durationMs: 10 })
+  );
   const gcs = fakeGcs(); // no seeded files → first snapshot
 
   const artifact = await runProbes(
@@ -426,7 +375,7 @@ it("runProbes attaches registryDelta to the artifact when v2Models are provided 
         { id: "gloo-b", family: "OpenAI", name: "B" },
       ],
     },
-    new Date("2026-04-20T18:00:00Z")
+    NOW
   );
 
   expect(artifact.registryDelta).toBeDefined();
@@ -444,24 +393,9 @@ it("runProbes attaches registryDelta to the artifact when v2Models are provided 
 });
 
 it("runProbes computes an add/remove delta against a previously persisted snapshot", async () => {
-  const probe: Probe = {
-    signature: "v2/noop",
-    label: "V2 · noop",
-    async run() {
-      return {
-        signature: "v2/noop",
-        label: "V2 · noop",
-        endpoint: "u",
-        apiVersion: "v2",
-        httpStatus: 200,
-        verdict: "PASS",
-        severity: "GREEN",
-        durationMs: 10,
-        details: {},
-        completedAt: 1700000000,
-      };
-    },
-  };
+  const probe = stubProbe(
+    makeOutcome({ signature: "v2/noop", label: "V2 · noop", durationMs: 10 })
+  );
   const gcs = fakeGcs({
     files: {
       "state/model-registry-snapshot.json": {
@@ -483,7 +417,7 @@ it("runProbes computes an add/remove delta against a previously persisted snapsh
         { id: "gloo-new", family: "OpenAI", name: "N" },
       ],
     },
-    new Date("2026-04-20T18:00:00Z")
+    NOW
   );
 
   const delta = artifact.registryDelta;
@@ -496,29 +430,20 @@ it("runProbes computes an add/remove delta against a previously persisted snapsh
 });
 
 it("runProbes does not attach registryDelta when v2Models are not passed", async () => {
-  const probe: Probe = {
-    signature: "v1/x",
-    label: "x",
-    async run() {
-      return {
-        signature: "v1/x",
-        label: "x",
-        endpoint: "u",
-        apiVersion: "v1",
-        httpStatus: 200,
-        verdict: "PASS",
-        severity: "GREEN",
-        durationMs: 1,
-        details: {},
-        completedAt: 1,
-      };
-    },
-  };
+  const probe = stubProbe(
+    makeOutcome({
+      signature: "v1/x",
+      label: "x",
+      apiVersion: "v1",
+      durationMs: 1,
+      completedAt: 1,
+    })
+  );
   const gcs = fakeGcs();
   const artifact = await runProbes(
     CONFIG,
     { probes: [probe], gcs, slack: fakeSlack() },
-    new Date("2026-04-20T18:00:00Z")
+    NOW
   );
   expect(artifact.registryDelta).toBeUndefined();
   // And no snapshot blob was written.
@@ -530,20 +455,7 @@ it("runDigest renders the registry delta as a YELLOW-flavored block in the top-l
     runId: "r",
     startedAt: "2026-04-20T06:00:00Z",
     completedAt: "2026-04-20T06:00:30Z",
-    outcomes: [
-      {
-        signature: "v2/auto",
-        label: "V2 · auto",
-        endpoint: "u",
-        apiVersion: "v2",
-        httpStatus: 200,
-        verdict: "PASS",
-        severity: "GREEN",
-        durationMs: 1000,
-        details: {},
-        completedAt: 1700000000,
-      },
-    ],
+    outcomes: [makeOutcome({ signature: "v2/auto", label: "V2 · auto" })],
     registryDelta: {
       previousCapturedAt: "2026-04-19T18:00:00.000Z",
       currentCapturedAt: "2026-04-20T06:00:00.000Z",
@@ -559,11 +471,7 @@ it("runDigest renders the registry delta as a YELLOW-flavored block in the top-l
   });
   const slack = fakeSlack();
 
-  const summary = await runDigest(
-    CONFIG,
-    { gcs, slack },
-    new Date("2026-04-20T18:00:00Z")
-  );
+  const summary = await runDigest(CONFIG, { gcs, slack }, NOW);
 
   // Top-level post mentions the registry change with a YELLOW-flavored
   // emoji and lists the added/removed ids. No :rotating_light: in the
@@ -584,46 +492,30 @@ it("runDigest filters outcomes against the current snapshot — retired signatur
     completedAt: "2026-04-20T06:00:30Z",
     outcomes: [
       // A currently-probed model that passed.
-      {
-        signature: "v2/model/gloo-a",
-        label: "V2 · A",
-        endpoint: "u",
-        apiVersion: "v2",
-        httpStatus: 200,
-        verdict: "PASS",
-        severity: "GREEN",
-        durationMs: 1000,
-        details: {},
-        completedAt: 1700000000,
-      },
+      makeOutcome({ signature: "v2/model/gloo-a", label: "V2 · A" }),
       // A retired-from-registry model that failed in a pre-deploy run —
       // should NOT contribute to "Needs attention" because it isn't in
       // the current probe set.
-      {
+      makeOutcome({
         signature: "v2/model/gloo-retired",
         label: "V2 · Retired",
-        endpoint: "u",
-        apiVersion: "v2",
         httpStatus: 400,
         verdict: "FAIL",
         severity: "RED",
         durationMs: 400,
-        details: {},
         completedAt: 1700000100,
-      },
+      }),
       // A V1 probe that's no longer in our fixture set.
-      {
+      makeOutcome({
         signature: "v1/llama3-70b",
         label: "V1 · llama3-70b",
-        endpoint: "u",
         apiVersion: "v1",
         httpStatus: 503,
         verdict: "FAIL",
         severity: "RED",
         durationMs: 500,
-        details: {},
         completedAt: 1700000200,
-      },
+      }),
     ],
   };
 
@@ -642,11 +534,7 @@ it("runDigest filters outcomes against the current snapshot — retired signatur
   });
   const slack = fakeSlack();
 
-  const summary = await runDigest(
-    CONFIG,
-    { gcs, slack },
-    new Date("2026-04-20T18:00:00Z")
-  );
+  const summary = await runDigest(CONFIG, { gcs, slack }, NOW);
 
   // Retired signatures are filtered out before aggregation.
   expect(summary.probesRun).toBe(1);
@@ -666,18 +554,15 @@ it("runDigest falls open when the snapshot blob is missing (no filter)", async (
     startedAt: "2026-04-20T06:00:00Z",
     completedAt: "2026-04-20T06:00:30Z",
     outcomes: [
-      {
+      makeOutcome({
         signature: "v2/model/whatever",
         label: "x",
-        endpoint: "u",
-        apiVersion: "v2",
         httpStatus: 500,
         verdict: "FAIL",
         severity: "RED",
         durationMs: 10,
-        details: {},
         completedAt: 1,
-      },
+      }),
     ],
   };
   const gcs = fakeGcs({
@@ -687,11 +572,7 @@ it("runDigest falls open when the snapshot blob is missing (no filter)", async (
   });
   const slack = fakeSlack();
 
-  const summary = await runDigest(
-    CONFIG,
-    { gcs, slack },
-    new Date("2026-04-20T18:00:00Z")
-  );
+  const summary = await runDigest(CONFIG, { gcs, slack }, NOW);
 
   // No filtering applied — the single RED outcome still surfaces.
   expect(summary.probesRun).toBe(1);
@@ -703,20 +584,7 @@ it("runDigest renders a subdued baseline note on the first-snapshot case", async
     runId: "r",
     startedAt: "2026-04-20T06:00:00Z",
     completedAt: "2026-04-20T06:00:30Z",
-    outcomes: [
-      {
-        signature: "v2/auto",
-        label: "V2 · auto",
-        endpoint: "u",
-        apiVersion: "v2",
-        httpStatus: 200,
-        verdict: "PASS",
-        severity: "GREEN",
-        durationMs: 1000,
-        details: {},
-        completedAt: 1700000000,
-      },
-    ],
+    outcomes: [makeOutcome({ signature: "v2/auto", label: "V2 · auto" })],
     registryDelta: {
       previousCapturedAt: null,
       currentCapturedAt: "2026-04-20T06:00:00.000Z",
@@ -732,11 +600,7 @@ it("runDigest renders a subdued baseline note on the first-snapshot case", async
   });
   const slack = fakeSlack();
 
-  const summary = await runDigest(
-    CONFIG,
-    { gcs, slack },
-    new Date("2026-04-20T18:00:00Z")
-  );
+  const summary = await runDigest(CONFIG, { gcs, slack }, NOW);
 
   expect(slack.posts[0].text).toContain(":memo:");
   expect(slack.posts[0].text).toContain("baseline captured");
@@ -754,24 +618,18 @@ it("runDigest renders a subdued baseline note on the first-snapshot case", async
 // confirm) false recoveries for open inference incidents.
 
 it("runProbes scopes failure state to activeFailuresPath and skips tier persist when asked", async () => {
-  const probe: Probe = {
-    signature: "ingestion/v2/e2e-text-file",
-    label: "Ingestion E2E",
-    async run() {
-      return {
-        signature: "ingestion/v2/e2e-text-file",
-        label: "Ingestion E2E",
-        endpoint: "https://example.com",
-        apiVersion: "items",
-        httpStatus: 502,
-        verdict: "FAIL",
-        severity: "RED",
-        durationMs: 100,
-        details: {},
-        completedAt: 1700000000,
-      };
-    },
-  };
+  const probe = stubProbe(
+    makeOutcome({
+      signature: "ingestion/v2/e2e-text-file",
+      label: "Ingestion E2E",
+      endpoint: "https://example.com",
+      apiVersion: "items",
+      httpStatus: 502,
+      verdict: "FAIL",
+      severity: "RED",
+      durationMs: 100,
+    })
+  );
 
   // An open INFERENCE incident lives in the default state blob. The
   // ingestion run must leave it untouched (no recovery bookkeeping).
@@ -798,7 +656,7 @@ it("runProbes scopes failure state to activeFailuresPath and skips tier persist 
       activeFailuresPath: "state/active-failures-ingestion.json",
       persistTierState: false,
     },
-    new Date("2026-04-20T18:00:00Z")
+    NOW
   );
 
   // Ingestion failure recorded in its own blob…
@@ -825,11 +683,9 @@ it("runProbes pings the heartbeat URL: bare on green, /fail on red, never on uns
     throw new Error(`unexpected url: ${url}`);
   });
 
-  const outcomeFor = (severity: "RED" | "GREEN"): Probe => ({
-    signature: "v1/test",
-    label: "v1",
-    async run() {
-      return {
+  const outcomeFor = (severity: "RED" | "GREEN"): Probe =>
+    stubProbe(
+      makeOutcome({
         signature: "v1/test",
         label: "v1",
         endpoint: "https://example.com",
@@ -838,11 +694,8 @@ it("runProbes pings the heartbeat URL: bare on green, /fail on red, never on uns
         verdict: severity === "RED" ? "FAIL" : "PASS",
         severity,
         durationMs: 1,
-        details: {},
-        completedAt: 1700000000,
-      };
-    },
-  });
+      })
+    );
 
   const withHeartbeat: CanaryConfig = {
     ...CONFIG,

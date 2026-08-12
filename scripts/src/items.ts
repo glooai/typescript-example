@@ -2,7 +2,9 @@ import { config as loadEnv } from "dotenv";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadApiKey } from "./auth.js";
+import { loadApiKey, loadPublisherId } from "./auth.js";
+
+export { loadPublisherId };
 
 const ITEMS_BASE_URL = "https://platform.ai.gloo.com/engine/v2/publisher";
 
@@ -14,18 +16,6 @@ export type Item = {
 };
 
 export type ItemsResponse = Item[];
-
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing ${name} environment variable.`);
-  }
-  return value;
-}
-
-export function loadPublisherId(): string {
-  return requireEnv("GLOO_PUBLISHER_ID");
-}
 
 export async function getItems(
   accessToken: string,

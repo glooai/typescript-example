@@ -17,29 +17,20 @@ async function fetchWithRetry(
   options: RequestInit,
   maxRetries = 5
 ): Promise<Response> {
-  let lastResponse: Response | null = null;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  for (let attempt = 0; ; attempt++) {
     const response = await fetch(url, options);
 
-    if (response.status !== 429) {
+    if (response.status !== 429 || attempt >= maxRetries) {
       return response;
     }
 
-    lastResponse = response;
-
-    if (attempt < maxRetries) {
-      // Exponential backoff with jitter
-      const backoffMs = Math.min(1000 * Math.pow(2, attempt), 30000);
-      const jitter = Math.random() * 1000;
-      console.warn(
-        `Rate limited (429), retrying in ${Math.round((backoffMs + jitter) / 1000)}s...`
-      );
-      await sleep(backoffMs + jitter);
-    }
+    const backoffMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+    const jitter = Math.random() * 1000;
+    console.warn(
+      `Rate limited (429), retrying in ${Math.round((backoffMs + jitter) / 1000)}s...`
+    );
+    await sleep(backoffMs + jitter);
   }
-
-  return lastResponse!;
 }
 
 export type CollectionMembership = {
@@ -104,11 +95,17 @@ export async function getItemMetadata(
   return (await response.json()) as ItemMetadata;
 }
 
+export type MetadataProgress = {
+  metadata: ItemMetadata;
+  index: number;
+  total: number;
+};
+
 export async function* fetchAllMetadata(
   accessToken: string,
   publisherId: string,
   batchSize: number = 20
-): AsyncGenerator<{ metadata: ItemMetadata; index: number; total: number }> {
+): AsyncGenerator<MetadataProgress> {
   const items = await getItems(accessToken, publisherId);
   const total = items.length;
 
@@ -147,11 +144,7 @@ function writeToStream(stream: WriteStream, data: string): Promise<void> {
 }
 
 export async function streamMetadataToFile(
-  generator: AsyncGenerator<{
-    metadata: ItemMetadata;
-    index: number;
-    total: number;
-  }>,
+  generator: AsyncGenerator<MetadataProgress>,
   outputPath: string
 ): Promise<number> {
   const stream = createWriteStream(outputPath);

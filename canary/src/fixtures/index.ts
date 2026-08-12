@@ -1,35 +1,18 @@
 /**
- * Probe fixtures — the surface area we're fuzzing. Each fixture becomes one
+ * Probe fixtures - the surface area we're fuzzing. Each fixture becomes one
  * Probe instance. Extend this file (not the runner) to add coverage.
  *
- * Source of truth for V2 direct-model aliases AND family routing values:
- * the live unauthenticated endpoint
- *   GET https://platform.ai.gloo.com/platform/v2/models
+ * Direct-model aliases and family routing values are hydrated at run time
+ * from the live registry, GET /platform/v2/models (the same feed the public
+ * supported-models docs page renders from, per `TangoGroup/gloo#2049`).
+ * Hydrating instead of keeping a checked-in mirror means the canary can't
+ * drift: retired models leave our probe set the same minute they leave the
+ * registry, and new families join it the same minute they appear.
  *
- * That's the same data feed the public supported-models docs page renders
- * from (see `TangoGroup/gloo#2049` — Mintlify was switched to pull from
- * this endpoint dynamically so docs can't drift from the platform registry
- * again). Hydrating the probe list at run time — instead of keeping a
- * checked-in mirror — means the canary can never drift either: retired
- * models disappear from our probes the same minute they disappear from
- * the registry, and new families start getting probed the same minute
- * they first show up.
- *
- * Scope:
- *   - V2 Completions is the actively supported surface. We probe every
- *     direct-model alias returned by the live registry PLUS every
- *     routing mode the router exposes. `auto_routing` is a single
- *     static fixture (it's a boolean flag, not a family). The
- *     `model_family` probes are derived dynamically from the distinct
- *     `family` values in the registry.
- *   - V1 Messages is deprecated and maintained for backwards-compat only.
- *     Per Gloo platform team (2026-04-21 triage thread, CC Elio Kazu
- *     Mostero + Jackson Southern): V1 has no cross-provider retry chain
- *     and individual models like `Llama 3 70B Instruct` are explicitly
- *     labeled deprecated in `ai-api`. We deliberately do NOT probe V1 —
- *     every failure would be a design-expected flake, not a platform
- *     outage signal. If a caller needs reliability, they should migrate
- *     to V2.
+ * V1 Messages is deliberately not probed. It is deprecated, has no
+ * cross-provider retry chain, and its models are labeled deprecated in
+ * `ai-api` (Gloo platform team, 2026-04-21 triage thread), so every V1
+ * failure would be a design-expected flake rather than an outage signal.
  */
 
 import type { V1MessagesFixture } from "../probes/v1-messages.js";
@@ -56,51 +39,25 @@ const BENIGN_PROMPT =
 // the whole batch completes well under the 600s job timeout.
 const V2_DIRECT_PROBE_TIMEOUT_MS = 120_000;
 
-// Cap full-sweep probe responses at 2048 tokens. Must be high enough
-// for reasoning models (Gemini 2.5 Pro, GPT-OSS 120B, DeepSeek R1,
-// etc.) to spend their internal thinking budget AND still produce a
-// user-visible answer; any value below ~1024 causes reasoning models
-// to exhaust the cap on thinking and return an empty completion,
-// which the platform converts to HTTP 503 / `service_unavailable_error`
-// (provider fault). Per Gloo platform team (Jackson Southern,
-// 2026-04-27 #support-gloo-ai thread on the canary's GAI-5477 reports),
-// the example benign prompt requires at minimum `max_tokens = 1024`
-// for a reasoning model. We pick 2048 for headroom against future
-// reasoning models with deeper thinking budgets.
-//
-// Cost note: this is the *cap*, not the actual emitted size. Non-
-// reasoning models will still produce one short sentence. Reasoning
-// models bill thinking tokens as output, so their per-probe cost
-// rises — but the canary fires ~22 Full-tier probes per Full sweep
-// and most ticks are Light, so the total inference budget stays
-// well within the daily ceiling. See
-// `.context/guides/gloo/api/completions-v2.md` for the `max_tokens`
-// contract and the RCA at
-// `canary/.context/adrs/2026-04-27-reasoning-model-max-tokens-rca.md`
-// for the full incident narrative.
+// Reasoning models need at least 1024 tokens or they exhaust the cap on
+// internal thinking and return an empty completion, which the platform
+// converts to HTTP 503 (Gloo platform team, 2026-04-27; RCA at
+// `canary/.context/adrs/2026-04-27-reasoning-model-max-tokens-rca.md`).
+// 2048 buys headroom for future models with deeper thinking budgets. This
+// is a cap, not the emitted size, so non-reasoning models still bill one
+// short sentence.
 const V2_FULL_PROBE_MAX_TOKENS = 2048;
 
-// Pulse-probe prompt — the single probe we fire in the "light" tier
-// every 15 min. Minimizes input token budget while still exercising
-// auth → router → completion. The benign-prompt reuse would also
-// work, but a single-word prompt keeps input billed-weight as low as
-// it can go without drifting from realistic usage.
+// A single word keeps the light tier's billed input weight as low as it can
+// go while still exercising auth, routing, and completion.
 const LIGHT_PULSE_PROMPT = "ping";
 
-// Light-tier cap. The pulse probe uses `auto_routing: true`, so the
-// platform may route the request to ANY model in the registry — and
-// today that registry includes reasoning models (Gemini 2.5 Pro,
-// GPT-OSS 120B, etc.) that need ~1024+ tokens of headroom or they
-// will exhaust the cap on thinking and return an empty completion
-// (which the platform surfaces as HTTP 503). The previous value of
-// 4 was a guaranteed false-RED whenever auto_routing landed on a
-// reasoning backend.
-//
-// Same minimum (1024) applies as for Full-tier probes; we use 1024
-// here rather than 2048 because the light pulse is content-blind
-// (`benign: false` turns off the refusal detector) and we don't
-// need the extra headroom for refusal-pattern matching. See the RCA
-// above for the full diagnosis.
+// The pulse probe uses `auto_routing`, so it can land on any model in the
+// registry and is bound by the same reasoning-model floor as the Full-tier
+// cap above. It sits at the floor rather than above it because the pulse is
+// content-blind (`benign: false`) and needs no headroom for refusal-pattern
+// matching. The old value of 4 was a guaranteed false-RED whenever
+// auto_routing picked a reasoning backend.
 const V2_LIGHT_PROBE_MAX_TOKENS = 1024;
 
 /**
@@ -130,24 +87,18 @@ export const V2_AUTO_ROUTING_FIXTURE: V2CompletionsFixture = {
 
 /**
  * Light-tier "pulse" fixture. Exactly one probe, fired on the every-15-min
- * schedule when no failures are active and a full sweep has happened
- * recently. Exercises the full production path (OAuth → router →
- * completion) with the minimum possible request + response weight so
- * steady-state inference spend is measured in single-digit tokens per
- * run.
+ * schedule when no failures are active and a full sweep happened recently.
  *
- * Detection semantics:
- *  - Platform-wide outage (OAuth down, router down, all providers down)
- *    → light probe fails → next scheduled run escalates to Full tier
- *    within 15 min. Well under the 1h awareness target.
- *  - Single-model or single-family outage → NOT caught here (router
- *    dodges unhealthy backends). Covered by the periodic Full sweep
- *    (see `CANARY_FULL_SWEEP_INTERVAL_MS`, default 1h).
+ * Detection semantics: a platform-wide outage (OAuth, router, or all
+ * providers down) fails this probe, and the next scheduled run escalates to
+ * Full tier within 15 min. A single-model or single-family outage is NOT
+ * caught here - the router dodges unhealthy backends - and is covered by
+ * the periodic Full sweep instead (`CANARY_FULL_SWEEP_INTERVAL_MS`).
  *
- * `benign: false` turns off the refusal detector — a 4-token response
- * can't reasonably be inspected for refusal patterns without false
- * positives, and any non-empty 2xx already proves the full completion
- * path worked. Schema validation + empty-content check still apply.
+ * `benign: false` turns off the refusal detector: a short response can't be
+ * inspected for refusal patterns without false positives, and any non-empty
+ * 2xx already proves the completion path worked. Schema validation and the
+ * empty-content check still apply.
  */
 export const V2_LIGHT_PULSE_FIXTURE: V2CompletionsFixture = {
   signature: "v2/light/auto_routing",
@@ -168,67 +119,54 @@ export function familySlug(family: string): string {
   return family.trim().toLowerCase().replace(/\s+/g, "-");
 }
 
+type FamilyGroup = { display: string; members: V2ModelSummary[] };
+
 /**
- * Distinct family names present in a V2 models response. Output is
- * sorted for stable Slack/stdout ordering and de-duped. Pulls the
- * canonical casing straight from the registry — so the fixture's
- * `model_family` request body stays in lock-step with whatever the
- * server currently accepts, even if Gloo adjusts casing over time.
+ * Bucket models by normalized family slug so casing and whitespace variants
+ * of one family ("OpenAI" vs " OpenAI ") collapse into a single entry rather
+ * than emitting two fixtures with the same "v2/family/openai" signature.
+ * The first-seen trimmed value is kept as the canonical display casing fed
+ * back to the API.
+ */
+function groupByFamilySlug(models: V2ModelSummary[]): Map<string, FamilyGroup> {
+  const bySlug = new Map<string, FamilyGroup>();
+  for (const m of models) {
+    if (!m.family || m.family.trim().length === 0) continue;
+    const slug = familySlug(m.family);
+    const group = bySlug.get(slug) ?? { display: m.family.trim(), members: [] };
+    group.members.push(m);
+    bySlug.set(slug, group);
+  }
+  return bySlug;
+}
+
+/**
+ * Distinct family names present in a V2 models response, sorted for stable
+ * Slack/stdout ordering. Casing comes straight from the registry so the
+ * fixture's `model_family` request body stays in lock-step with whatever the
+ * server currently accepts.
  *
- * Every distinct family is returned, image-only families included.
- * Image-only families (e.g. "Black Forest Labs", "ByteDance", "xAI")
- * are still probed — but as `expectRejection` fixtures that assert the
- * platform 400s them (`model_family` routing has no text member to
- * select), see `imageOnlyFamilies` + `buildV2FamilyFixtures`.
+ * Image-only families are included: they are still probed, as
+ * `expectRejection` fixtures - see `imageOnlyFamilies`.
  */
 export function extractFamilies(models: V2ModelSummary[]): string[] {
-  // Dedupe on the normalized slug (trim + lowercase) so casing and
-  // whitespace variants of the same family ("OpenAI" vs " OpenAI ") collapse
-  // to a single entry instead of emitting two fixtures that both compute the
-  // signature "v2/family/openai". Keep the first-seen trimmed value as the
-  // canonical display casing fed to the API.
-  const bySlug = new Map<string, string>();
-  for (const m of models) {
-    if (m.family && m.family.trim().length > 0) {
-      const slug = familySlug(m.family);
-      if (!bySlug.has(slug)) bySlug.set(slug, m.family.trim());
-    }
-  }
-  return Array.from(bySlug.values()).sort((a, b) => a.localeCompare(b));
+  return Array.from(groupByFamilySlug(models).values())
+    .map((group) => group.display)
+    .sort((a, b) => a.localeCompare(b));
 }
 
 /**
  * Family names whose every registry member is image-only (no "text" in
- * output_modalities). The platform's `model_family` router can't select a
- * text-completable model for these, so a v2 chat-completions request is
- * rejected with a 4xx — which the family probe asserts via `expectRejection`.
- * A mixed family (at least one text-output member) is NOT image-only: the
- * router picks the text member, so its probe expects a normal 2xx. Derived
- * live so a family flips the minute its membership changes — e.g. if xAI
- * ships a text model, "xAI" drops out of this set and its probe reverts to
+ * output_modalities). The `model_family` router can't select a
+ * text-completable model for these, so the request is rejected with a 4xx -
+ * which the family probe asserts via `expectRejection`. A mixed family is
+ * NOT image-only: the router picks the text member. Derived live, so if xAI
+ * ships a text model "xAI" drops out of this set and its probe reverts to
  * expecting success.
  */
 export function imageOnlyFamilies(models: V2ModelSummary[]): Set<string> {
-  // Group on the normalized slug (trim + lowercase) so casing and whitespace
-  // variants of one family land in the same bucket instead of two. The set
-  // stores the canonical trimmed display value that `extractFamilies`
-  // emits, so `imageOnly.has(family)` lines up in `buildV2FamilyFixtures`.
-  const byFamily = new Map<
-    string,
-    { display: string; members: V2ModelSummary[] }
-  >();
-  for (const m of models) {
-    if (!m.family || !m.family.trim()) continue;
-    const slug = familySlug(m.family);
-    const bucket = byFamily.get(slug) ?? {
-      display: m.family.trim(),
-      members: [],
-    };
-    bucket.members.push(m);
-    byFamily.set(slug, bucket);
-  }
   const out = new Set<string>();
-  for (const { display, members } of byFamily.values()) {
+  for (const { display, members } of groupByFamilySlug(models).values()) {
     if (members.every((m) => !isTextOutputModel(m))) out.add(display);
   }
   return out;
@@ -236,15 +174,13 @@ export function imageOnlyFamilies(models: V2ModelSummary[]): Set<string> {
 
 /**
  * Build one `model_family=<family>` fixture per distinct family in the
- * registry. Previously this list was hardcoded to {Anthropic, Google,
- * OpenAI, Open Source} — the current registry values at the time the
- * canary was written. Hardcoding meant a new family (e.g. "Mistral",
- * "xAI") would be silently skipped until somebody manually updated the
- * fixture list. Deriving from the registry closes that gap.
+ * registry. This list used to be hardcoded, which meant a new family
+ * ("Mistral", "xAI") was silently skipped until somebody updated it by
+ * hand.
  *
- * Signatures use `familySlug()` so Slack + digest output keep the
- * same slugs ("v2/family/anthropic", "v2/family/open-source") we had
- * before. Labels use the canonical casing for human readability.
+ * Signatures go through `familySlug()` so Slack and digest output keep the
+ * slugs they had before ("v2/family/open-source"); labels use the canonical
+ * registry casing.
  */
 export function buildV2FamilyFixtures(
   families: string[],
@@ -290,11 +226,10 @@ export function buildV2RoutingFixtures(
 /**
  * Build one direct-model fixture per entry in a V2 models response.
  *
- * Signatures are derived deterministically from the model id — `v2/model/<id>`
- * — so they stay stable as long as the platform keeps the id stable, and
- * so we never need a manual slug-mapping table. Labels come straight from
- * the registry's `name` field, which is the same string the Studio Model
- * Explorer shows.
+ * Signatures are derived from the model id (`v2/model/<id>`) so they stay
+ * stable as long as the platform keeps the id stable, with no manual
+ * slug-mapping table. Labels come from the registry's `name` field, the
+ * same string the Studio Model Explorer shows.
  */
 export function buildV2DirectModelFixtures(
   models: V2ModelSummary[]
@@ -455,29 +390,21 @@ export async function buildV2Fixtures(
 }
 
 /**
- * Signatures the canary is *currently* intended to probe given a
- * snapshot of the live registry. Includes V1 (currently empty),
- * the light-pulse signature, `v2/auto_routing`, one
- * `v2/family/<slug>` per distinct family, one `v2/model/<id>`
- * per model, and the three static capability probes (tool calling,
- * multi-turn, jailbreak safety). The digest uses this to filter
- * archived outcomes for signatures that are no longer in the probe
- * set — e.g., retired-from-registry aliases or families whose old
- * runs still sit in the 24h window. One definition, one call site,
- * no drift between the probe build path and the digest filter path.
+ * Signatures the canary currently intends to probe, given a snapshot of the
+ * live registry. The digest uses this to drop archived outcomes for
+ * signatures that have left the probe set (retired aliases or families
+ * whose old runs still sit inside the window). Keeping it beside the
+ * fixture builders is what stops the build path and the filter path from
+ * drifting apart.
  *
- * Takes `modelIds` + `families` (rather than the fuller
- * `V2ModelSummary[]`) so the digest can call it directly with the
- * GCS snapshot blob, which only stores those two fields. `families`
- * is optional to tolerate older snapshots written before the field
- * was added — callers pass `undefined` (or omit it) and the family
- * slice returns empty, so the digest fall-open behavior for legacy
- * snapshots is preserved.
+ * Takes `modelIds` + `families` rather than `V2ModelSummary[]` so the
+ * digest can call it directly with the GCS snapshot blob, which stores only
+ * those two fields. `families` is optional to tolerate snapshots written
+ * before the field existed - the family slice then returns empty and the
+ * digest's fall-open behavior is preserved.
  *
- * Image-only models/families are included here: they ARE probed (as
- * `expectRejection` fixtures asserting the platform's 4xx), so their
- * `v2/model/<id>` / `v2/family/<slug>` signatures belong in the
- * allowed set just like every other probe.
+ * Image-only models and families belong in the allowed set like any other
+ * probe: they ARE probed, as `expectRejection` fixtures.
  */
 export function currentProbeSignatures(
   modelIds: string[],

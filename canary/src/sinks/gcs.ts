@@ -129,14 +129,19 @@ function isGzip(buf: Buffer): boolean {
   return buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b;
 }
 
+/** Hour-granular archive prefix for a moment in time: runs/2026/04/20/18 */
+export function runHourPrefix(at: Date): string {
+  const y = at.getUTCFullYear();
+  const m = String(at.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(at.getUTCDate()).padStart(2, "0");
+  const h = String(at.getUTCHours()).padStart(2, "0");
+  return `runs/${y}/${m}/${d}/${h}`;
+}
+
 /** Stable object path for a run's archive: runs/2026/04/20/18-<runId>.json */
 export function runArtifactPath(runId: string, startedAt: Date): string {
-  const y = startedAt.getUTCFullYear();
-  const m = String(startedAt.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(startedAt.getUTCDate()).padStart(2, "0");
-  const h = String(startedAt.getUTCHours()).padStart(2, "0");
   const safeId = runId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return `runs/${y}/${m}/${d}/${h}-${safeId}.json`;
+  return `${runHourPrefix(startedAt)}-${safeId}.json`;
 }
 
 export const ACTIVE_FAILURES_PATH = "state/active-failures.json";

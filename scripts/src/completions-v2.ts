@@ -62,7 +62,7 @@ export type CompletionsV2Response = {
  * Post a Completions V2 chat request.
  *
  * This is the minimal wrapper used by the moderation reproducer. It
- * intentionally does not massage the request body — we want the raw payload
+ * intentionally does not massage the request body - we want the raw payload
  * to match what downstream apps are sending so the behavior we observe here
  * is apples-to-apples with the bug report.
  */

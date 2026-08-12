@@ -2,7 +2,9 @@ import { config as loadEnv } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
-import { loadApiKey, withTimeout } from "./auth.js";
+import { loadApiKey, loadPublisherId, withTimeout } from "./auth.js";
+
+export { loadPublisherId };
 
 const INGESTION_URL = "https://platform.ai.gloo.com/ingestion/v2/files";
 
@@ -12,18 +14,6 @@ export type IngestionResponse = {
   ingesting: string[];
   duplicates: string[];
 };
-
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing ${name} environment variable.`);
-  }
-  return value;
-}
-
-export function loadPublisherId(): string {
-  return requireEnv("GLOO_PUBLISHER_ID");
-}
 
 export type FileInput = {
   name: string;
@@ -81,6 +71,17 @@ export async function uploadFilesFromPaths(
   return uploadFiles(token, publisherId, files);
 }
 
+function logFileList(label: string, files: string[]): void {
+  console.log(`  ${label} (${files.length}):`);
+  if (files.length > 0) {
+    for (const file of files) {
+      console.log(`    - ${file}`);
+    }
+  } else {
+    console.log("    (none)");
+  }
+}
+
 async function main(): Promise<void> {
   const filePaths = process.argv.slice(2);
 
@@ -107,23 +108,9 @@ async function main(): Promise<void> {
   console.log(`  Success: ${result.success}`);
   console.log(`  Message: ${result.message}`);
   console.log();
-  console.log(`  Ingesting (${result.ingesting.length}):`);
-  if (result.ingesting.length > 0) {
-    for (const file of result.ingesting) {
-      console.log(`    - ${file}`);
-    }
-  } else {
-    console.log("    (none)");
-  }
+  logFileList("Ingesting", result.ingesting);
   console.log();
-  console.log(`  Duplicates (${result.duplicates.length}):`);
-  if (result.duplicates.length > 0) {
-    for (const file of result.duplicates) {
-      console.log(`    - ${file}`);
-    }
-  } else {
-    console.log("    (none)");
-  }
+  logFileList("Duplicates", result.duplicates);
 }
 
 const isEntryPoint = process.argv[1] === fileURLToPath(import.meta.url);

@@ -1,4 +1,4 @@
-import { expect, it, vi, beforeEach, afterEach } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   FAILING_V1_MODEL,
   RECOMMENDED_V2_HAIKU_MODEL,
@@ -9,17 +9,9 @@ import {
   runCase,
   verdictFor,
 } from "../src/sonnet-4-repro.js";
+import { restoreEnvAndMocks } from "./helpers.js";
 
-const originalEnv = { ...process.env };
-
-beforeEach(() => {
-  process.env = { ...originalEnv };
-});
-
-afterEach(() => {
-  process.env = { ...originalEnv };
-  vi.restoreAllMocks();
-});
+restoreEnvAndMocks();
 
 it("pins the exact deprecated V1 model ID under test", () => {
   // The Anthropic Bedrock inference profile for Sonnet 4 was deprecated

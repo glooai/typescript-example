@@ -1,29 +1,8 @@
-import { expect, it, vi, beforeEach, afterEach } from "vitest";
+import { expect, it, vi } from "vitest";
 import * as searchModule from "../src/search.js";
+import { mockFetch, restoreEnvAndMocks, type FetchCall } from "./helpers.js";
 
-type FetchCall = {
-  url?: string | URL | Request;
-  init?: RequestInit;
-};
-
-const originalEnv = { ...process.env };
-
-const mockFetch = (payload: unknown, status = 200): Promise<Response> =>
-  Promise.resolve(
-    new Response(JSON.stringify(payload), {
-      status,
-      headers: { "Content-Type": "application/json" },
-    })
-  );
-
-beforeEach(() => {
-  process.env = { ...originalEnv };
-});
-
-afterEach(() => {
-  process.env = { ...originalEnv };
-  vi.restoreAllMocks();
-});
+restoreEnvAndMocks();
 
 it("posts search request with correct payload", async () => {
   const calls: FetchCall = {};
