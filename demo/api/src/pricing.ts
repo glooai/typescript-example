@@ -133,9 +133,9 @@ export function estimateCostUsd(
 }
 
 /**
- * Cold-start-cached registry fetch. A Lambda execution environment handles
- * many requests, so refetching per request would add latency to every call
- * for data that changes on a scale of weeks.
+ * Process-cached registry fetch. One container handles many requests, so
+ * refetching per request would add latency to every call for data that
+ * changes on a scale of weeks.
  */
 export function createRegistryLoader(
   options: {

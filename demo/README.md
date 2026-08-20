@@ -19,54 +19,96 @@ price arithmetic on invented token counts.
 
 ## Layout
 
-| Path         | What it is                                                   |
-| ------------ | ------------------------------------------------------------ |
-| `web/`       | `@glooai/demo-web`, a static React SPA built with Vite       |
-| `api/`       | `@glooai/demo-api`, the proxy Lambda (bundled with esbuild)  |
-| `terraform/` | S3, CloudFront, ACM, Route53, Lambda, DynamoDB, Secrets      |
-| `deploy.sh`  | Builds the SPA, syncs it to S3, invalidates the distribution |
+| Path         | What it is                                                          |
+| ------------ | ------------------------------------------------------------------- |
+| `web/`       | `@glooai/demo-web`, a static React SPA built with Vite              |
+| `api/`       | `@glooai/demo-api`, the proxy HTTP server (bundled, containerized)  |
+| `terraform/` | S3, CloudFront, ACM, Route53, ECR, ECS, ALB rule, DynamoDB, Secrets |
+| `deploy.sh`  | Pushes the API image and redeploys ECS, then syncs the SPA to S3    |
 
 ## Architecture
 
 ```
 browser -> CloudFront (Basic Auth viewer function, X-Robots-Tag)
              |- default behavior  -> S3 (private, origin access control)
-             `- /api/*            -> Lambda Function URL (RESPONSE_STREAM)
-                                       |- Gloo Completions V2
-                                       |- Secrets Manager (Gloo API key)
-                                       `- DynamoDB (ledger + sessions)
+             `- /api/*            -> shared `genesis` ALB, host-based rule
+                                       `- ECS Fargate task (Node, ARM64)
+                                            |- Gloo Completions V2
+                                            |- Secrets Manager (Gloo API key)
+                                            `- DynamoDB (ledger + sessions)
 ```
 
-The SPA holds no credentials. Every Gloo call goes through the Lambda, which
-reads the API key from Secrets Manager at cold start.
+The SPA holds no credentials. Every Gloo call goes through the API service,
+which reads the API key from Secrets Manager at startup using its ECS task
+role.
+
+### Why Fargate and not Lambda
+
+It was a Lambda behind a Function URL. This account has an org-level
+guardrail that blocks CloudFront from invoking a Function URL at all, which
+neither a correctly scoped resource policy nor a CloudFront origin access
+control gets around: the invoke returns `AccessDeniedException` either way.
+
+The alternatives that keep Lambda (API Gateway, ALB-to-Lambda) both buffer
+the response, which would have cost `/api/chat` its token-by-token
+streaming, and that is the whole point of the Chat panel. A container writing
+into a chunked HTTP response streams natively and drops the
+`awslambda.HttpResponseStream` shim with it.
+
+### Why the shared ALB
+
+The `genesis` ALB in this account already runs, so a second one would be a
+fixed hourly cost for one service and single-digit requests per day. This
+stack reads it with `data` sources and adds three things it owns: a target
+group, one host-based listener rule, and one extra SNI certificate on the
+existing HTTPS listener. The listener's default action is unchanged, so
+anything that does not match the rule's host still lands where it did.
+
+### The origin hostname
+
+`/api/*` is served from `glooai-origin.servant.run`, not from the ALB's own
+`*.elb.amazonaws.com` name. CloudFront sends the origin domain name as SNI
+and validates the origin certificate against it, and an ALB serves
+certificates for named hosts. `glooai.servant.run` cannot be that name: it is
+already an alias for the distribution.
+
+Reaching that hostname directly skips CloudFront's Basic Auth gate but still
+fails the `x-demo-origin` check, which is what the header is for.
 
 ### Why the frontend is Vite and not Next.js
 
 The `chatbot/` package in this repo already demonstrates the Next.js server
 rendered pattern. This one is deliberately the other shape: a static bundle on
-S3 with no server runtime, so the only compute is the proxy Lambda.
+S3 with no server runtime, so the only compute is the proxy API service.
 
 ### Streaming vs buffering
 
-`/api/chat` streams. The Function URL runs in `RESPONSE_STREAM` invoke mode,
-the Lambda forwards Gloo's SSE as its own three-event protocol
-(`delta`, `meta`, `error`), and CloudFront passes it through with compression
-disabled on that behavior so nothing buffers.
+`/api/chat` streams. The server writes Gloo's SSE straight into a chunked
+response as its own three-event protocol (`delta`, `meta`, `error`), and
+CloudFront passes it through with compression disabled on that behavior so
+nothing buffers.
 
 `/api/compare` buffers on purpose. It fans one prompt out to several routing
 variants concurrently and the comparison is only meaningful once every variant
 has finished, so streaming it would add moving parts for no user-visible gain.
 
-### Why the Function URL is public
+### Why there is a shared origin header
 
-CloudFront can sign requests to a Lambda Function URL with an origin access
-control, but SigV4 over a request body needs a payload hash that CloudFront
-cannot compute for a POST. Every interesting route here is a POST. So the
-Function URL uses `authorization_type = "NONE"` and CloudFront instead injects
-a shared `x-demo-origin` header on every origin request; the handler rejects
-anything without it. That header value is generated by Terraform and lives in
-Terraform state. The Gloo API key does not: Terraform creates an empty
-Secrets Manager secret and a human populates it.
+There is no origin-access-control equivalent for an ALB origin, and the ALB
+is internet-facing and shared, so the network is not the gate. CloudFront
+injects a shared `x-demo-origin` header on every origin request and the
+server rejects anything without it. The task's own security group still
+allows inbound only from the ALB's security group, so the container itself is
+not addressable.
+
+That header value is generated by Terraform and lives in Terraform state. The
+Gloo API key does not: Terraform creates an empty Secrets Manager secret and
+a human populates it.
+
+`GET /healthz` is the one route that answers without the header, because an
+ALB health check cannot send it. It reports process liveness only: a Gloo or
+DynamoDB outage deliberately does not fail it, since replacing the task would
+not fix either and would drop live streams to do it.
 
 ## Data model
 
@@ -79,10 +121,10 @@ One DynamoDB table, pay-per-request, TTL on `expires_at`. Two entity types:
 
 Both entity types also carry an anonymous visitor trace, described below.
 
-DynamoDB rather than Postgres because the only compute is Lambda: there is no
-connection pool to exhaust, and no migration to run before a deploy. No
-secondary indexes, because every read is a Query against a known partition
-key. The ledger partition is the UTC calendar day rather than a constant, so
+DynamoDB rather than Postgres because it costs nothing at rest, needs no
+migration before a deploy, and there is nothing relational about two
+independent key-addressed entity types. No secondary indexes, because every
+read is a Query against a known partition key. The ledger partition is the UTC calendar day rather than a constant, so
 writes rotate instead of concentrating on one partition forever; reads cover
 today and yesterday and merge.
 
@@ -99,13 +141,13 @@ or reviewing how much this proof of concept is being used.
 
 ### Where the cookie is set, and why there
 
-The proxy Lambda mints it, not CloudFront. `functions/basic-auth.js` is a
+The proxy API mints it, not CloudFront. `functions/basic-auth.js` is a
 viewer-request function, so it runs before the origin and can only mutate the
 request; it cannot attach a `Set-Cookie` to the response at all. A second
 CloudFront function on viewer-response could, but CloudFront Functions have
 no `crypto`, so the id would come out of `Math.random()`, and it would mean a
 second published function and a second behavior association to maintain. The
-Lambda has real `crypto.randomUUID()` and is the only component that writes
+API has real `crypto.randomUUID()` and is the only component that writes
 the rows the id is a trace key for. The trade is that a visitor who loads the
 page and never sends a prompt never gets an id, which is exactly the visitor
 who leaves no rows to correlate.
@@ -121,7 +163,7 @@ replay a cookie. The next uncached call issues it.
 `Path=/`, `Max-Age` 30 days, `Secure`, `HttpOnly`, `SameSite=Lax`.
 
 `HttpOnly` because the SPA never reads it: the browser attaches it to the
-same-origin `/api/*` calls and the Lambda reads it there. `SameSite=Lax`
+same-origin `/api/*` calls and the API reads it there. `SameSite=Lax`
 rather than `Strict` because both work for the app's own same-origin
 requests, and `Lax` additionally keeps the cookie attached when someone opens
 the demo link from an email or a chat message, which is how this demo gets
@@ -149,7 +191,7 @@ browser.
 
 The cookie is optional everywhere. Safari private browsing, ITP, a blocker,
 or a visitor who clears cookies mid-session all behave the same way: the
-Lambda mints an id for that request, records it as `visitor_id_source:
+API mints an id for that request, records it as `visitor_id_source:
 "issued"` rather than `"cookie"`, and offers the cookie again. Nothing about
 the response changes, no error surfaces, and chat and compare work exactly as
 they do otherwise. Marking the source is what stops a reader from mistaking a
@@ -164,10 +206,10 @@ was not changed for any of this.
 
 ## Local development
 
-The SPA needs the API. Point it at a deployed Function URL:
+The SPA needs the API. Point it at the deployed origin:
 
 ```bash
-export DEMO_API_URL="$(terraform -chdir=terraform output -raw lambda_function_url)"
+export DEMO_API_URL="$(terraform -chdir=terraform output -raw api_origin_url)"
 export DEMO_ORIGIN_SECRET="$(terraform -chdir=terraform output -raw origin_secret)"
 pnpm --filter @glooai/demo-web dev
 ```
@@ -175,17 +217,27 @@ pnpm --filter @glooai/demo-web dev
 Vite proxies `/api/*` to that URL and adds the origin header, so the app runs
 on the same relative paths it uses in production.
 
+Or run the API itself, which needs the same four variables the ECS task
+definition sets and AWS credentials that can read the secret and the table:
+
+```bash
+pnpm --filter @glooai/demo-api build
+
+DEMO_TABLE_NAME="$(terraform -chdir=terraform output -raw dynamodb_table_name)" \
+GLOO_API_KEY_SECRET_ID="$(terraform -chdir=terraform output -raw gloo_api_key_secret_id)" \
+ORIGIN_SECRET=local VISITOR_SALT=local PORT=5174 \
+AWS_PROFILE=servant-internal \
+  node api/dist/server/index.mjs
+```
+
 ## Deploying
 
-Terraform in this directory is written and validated but has never been
-applied. First deploy, from a machine with the `servant-internal` profile
-configured:
+The stack is applied and live. A full deploy from a machine with the
+`servant-internal` profile configured (the DNS records go into a hosted zone
+in a second account, reached through the `personal` profile):
 
 ```bash
 aws sso login --profile servant-internal
-
-# The Lambda zip is built from demo/api/dist/lambda, so build first.
-pnpm --filter @glooai/demo-api build
 
 cd demo/terraform
 terraform init
@@ -201,6 +253,18 @@ aws secretsmanager put-secret-value \
 cd ..
 ./deploy.sh
 ```
+
+`terraform apply` creates the ECR repository but no image, so the first ECS
+service comes up with nothing to pull and stays unhealthy until `deploy.sh`
+pushes one. That is one cycle of failed tasks on a first apply, not a broken
+deploy.
+
+`deploy.sh` builds the API image for `linux/arm64`, pushes it tagged with the
+short commit sha and `latest`, forces a new ECS deployment, then builds and
+syncs the SPA and invalidates the distribution. It needs Docker with `buildx`
+available. The task definition runs `:latest`, so routine backend deploys do
+not need a Terraform apply; set `image_tag` to a specific tag to pin or roll
+back one.
 
 `terraform apply` blocks on ACM DNS validation, which usually clears in a few
 minutes since the validation records go into the same hosted zone.

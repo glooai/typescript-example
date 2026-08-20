@@ -1,0 +1,10 @@
+# Only package.json, tsconfig.json, build.mjs and src/ are needed to build.
+node_modules
+dist
+coverage
+.turbo
+tests
+vitest.config.ts
+.eslintrc.cjs
+Dockerfile
+.dockerignore

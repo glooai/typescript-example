@@ -8,11 +8,11 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "lcov"],
       include: ["src/**/*.ts"],
-      // The handler is an I/O shell (Lambda streaming, DynamoDB, fetch);
-      // the logic worth covering lives in the pure modules it calls.
+      // The server and its entrypoint are an I/O shell (sockets, DynamoDB,
+      // fetch); the logic worth covering lives in the pure modules they call.
       exclude: [
-        "src/handler.ts",
-        "src/aws.ts",
+        "src/server.ts",
+        "src/index.ts",
         "src/config.ts",
         "src/**/*.d.ts",
       ],

@@ -13,9 +13,24 @@ output "cloudfront_distribution_id" {
   value       = aws_cloudfront_distribution.site.id
 }
 
-output "lambda_function_url" {
-  description = "Lambda Function URL. Only reachable usefully through CloudFront, which adds the origin header."
-  value       = aws_lambda_function_url.api.function_url
+output "api_origin_url" {
+  description = "Origin hostname the API is served on. Only reachable usefully through CloudFront, which adds the origin header."
+  value       = "https://${var.origin_domain_name}"
+}
+
+output "ecr_repository_url" {
+  description = "ECR repository the API image is pushed to on deploy"
+  value       = aws_ecr_repository.api.repository_url
+}
+
+output "ecs_cluster_name" {
+  description = "Existing cluster the API service runs on (read, not managed, by this stack)"
+  value       = data.aws_ecs_cluster.genesis.cluster_name
+}
+
+output "ecs_service_name" {
+  description = "API service, redeployed by deploy.sh after an image push"
+  value       = aws_ecs_service.api.name
 }
 
 output "dynamodb_table_name" {
@@ -29,7 +44,7 @@ output "gloo_api_key_secret_id" {
 }
 
 output "origin_secret" {
-  description = "Shared header value CloudFront sends to the Lambda. Needed for local dev against the deployed API."
+  description = "Shared header value CloudFront sends to the API. Needed for local dev against the deployed API."
   value       = random_password.origin_secret.result
   sensitive   = true
 }

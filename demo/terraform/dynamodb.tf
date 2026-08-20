@@ -2,9 +2,10 @@
 #
 # Pay-per-request because demo traffic is bursty and mostly zero, and because
 # it removes capacity planning from a proof of concept entirely. DynamoDB
-# rather than a relational database specifically because this is fronted by
-# Lambda: there is no connection pool to exhaust and no migration step to run
-# before a deploy.
+# rather than a relational database because it is the only datastore here
+# that costs nothing at rest and needs no migration step before a deploy;
+# there is also nothing relational about two independent key-addressed entity
+# types.
 #
 # Two entity types share the table, both keyed on pk/sk (see
 # demo/api/src/ledger.ts for the full key design):
@@ -39,7 +40,7 @@ resource "aws_dynamodb_table" "demo" {
   }
 
   # Demo data expires on its own rather than needing a cleanup job. The
-  # per-item values are set by the Lambda: 7 days for ledger rows, 12 hours
+  # per-item values are set by the API: 7 days for ledger rows, 12 hours
   # for conversations.
   ttl {
     attribute_name = "expires_at"

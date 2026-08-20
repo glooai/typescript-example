@@ -10,8 +10,8 @@
 #     --secret-id <this secret's name> \
 #     --secret-string 'gloo-api-key-value'
 #
-# The Lambda reads it at cold start with GetSecretValue, scoped to this ARN
-# alone.
+# The API task reads it at startup with GetSecretValue, scoped to this ARN
+# alone by the task role.
 
 resource "aws_secretsmanager_secret" "gloo_api_key" {
   name        = "${local.name_prefix}/gloo-ai-api-key"
@@ -21,7 +21,7 @@ resource "aws_secretsmanager_secret" "gloo_api_key" {
   recovery_window_in_days = 0
 }
 
-# Shared value CloudFront attaches to every origin request so the Lambda can
+# Shared value CloudFront attaches to every origin request so the API can
 # reject traffic that did not come through the distribution. This is not a
 # user credential and gates no data, only inference spend, so keeping it in
 # Terraform state (which is local and gitignored) is an acceptable trade

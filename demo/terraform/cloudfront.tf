@@ -78,13 +78,25 @@ resource "aws_cloudfront_response_headers_policy" "noindex" {
 }
 
 locals {
-  s3_origin_id     = "s3-${aws_s3_bucket.site.id}"
-  lambda_origin_id = "lambda-${aws_lambda_function.api.function_name}"
+  s3_origin_id  = "s3-${aws_s3_bucket.site.id}"
+  api_origin_id = "alb-${local.name_prefix}-api"
 
   # AWS managed policies, referenced by their well-known ids.
-  cache_policy_optimized    = "658327ea-f89d-4fab-a63d-7e88639e58f6"
-  cache_policy_disabled     = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
-  origin_request_all_viewer = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+  cache_policy_optimized = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  cache_policy_disabled  = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+
+  # Managed-AllViewerExceptHostHeader. Forwards every viewer cookie, query
+  # string, and header except Host, so the origin sees `Host:
+  # <origin_domain_name>`; that is the name the ALB listener rule matches on,
+  # and the name CloudFront presents as SNI, so the two agree.
+  #
+  # This was briefly replaced by a policy that also stripped Authorization,
+  # because CloudFront generates its own Authorization header when it signs a
+  # Lambda Function URL with an origin access control, and the forwarded
+  # Basic Auth credential collided with it. A plain ALB origin is not signed
+  # and CloudFront sets no Authorization header of its own, so the collision
+  # cannot arise here and the managed policy is correct again.
+  origin_request_all_viewer_except_host = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
 }
 
 resource "aws_cloudfront_distribution" "site" {
@@ -100,13 +112,13 @@ resource "aws_cloudfront_distribution" "site" {
     origin_access_control_id = aws_cloudfront_origin_access_control.site.id
   }
 
+  # The shared genesis ALB, reached by its own hostname rather than by
+  # `data.aws_lb.genesis.dns_name`. CloudFront sends the origin domain name
+  # as SNI and validates the origin certificate against it, and the ALB's
+  # certificates cover named hosts, not the `*.elb.amazonaws.com` address.
   origin {
-    domain_name = replace(
-      replace(aws_lambda_function_url.api.function_url, "https://", ""),
-      "/",
-      "",
-    )
-    origin_id = local.lambda_origin_id
+    domain_name = var.origin_domain_name
+    origin_id   = local.api_origin_id
 
     custom_origin_config {
       http_port                = 80
@@ -117,9 +129,10 @@ resource "aws_cloudfront_distribution" "site" {
       origin_keepalive_timeout = 60
     }
 
-    # Proves the request came through this distribution. The Function URL is
-    # publicly addressable (see the note in lambda.tf), so this is what stops
-    # anyone who finds the URL from spending our Gloo tokens.
+    # Proves the request came through this distribution. The ALB is
+    # internet-facing and shared, and has no origin-access-control
+    # equivalent, so this header is what stops anyone who finds the origin
+    # hostname from spending our Gloo tokens.
     custom_header {
       name  = "x-demo-origin"
       value = random_password.origin_secret.result
@@ -145,7 +158,7 @@ resource "aws_cloudfront_distribution" "site" {
     path_pattern           = "/api/*"
     allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = local.lambda_origin_id
+    target_origin_id       = local.api_origin_id
     viewer_protocol_policy = "https-only"
 
     # Compression would make CloudFront buffer the response, which defeats
@@ -153,7 +166,7 @@ resource "aws_cloudfront_distribution" "site" {
     compress = false
 
     cache_policy_id            = local.cache_policy_disabled
-    origin_request_policy_id   = local.origin_request_all_viewer
+    origin_request_policy_id   = local.origin_request_all_viewer_except_host
     response_headers_policy_id = aws_cloudfront_response_headers_policy.noindex.id
 
     function_association {
