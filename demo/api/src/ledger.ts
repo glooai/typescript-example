@@ -59,6 +59,21 @@ export type LedgerItem = {
 /** A history entry is a label in a list, not a second copy of the transcript. */
 const PREVIEW_MAX_LENGTH = 120;
 
+/**
+ * The summary row's own attributes, all optional and all absent on a
+ * conversation nobody has acted on. They live here rather than on a second
+ * item type because DynamoDB stores no per-item schema: adding them is a
+ * write, not a migration, and a row written before they existed reads back as
+ * an unpinned, unarchived, untitled conversation without any backfill.
+ */
+export type SessionIndexFlags = {
+  title?: string;
+  /** Set once a visitor renames the conversation; never unset. */
+  title_is_custom?: boolean;
+  pinned?: boolean;
+  archived?: boolean;
+};
+
 export type SessionIndexItem = {
   pk: string;
   sk: string;
@@ -67,7 +82,7 @@ export type SessionIndexItem = {
   session_id: string;
   last_message_at: string;
   preview: string;
-};
+} & SessionIndexFlags;
 
 export type SessionItem = {
   pk: string;
@@ -186,27 +201,113 @@ export function sessionPreview(messages: ChatMessage[]): string {
     : text;
 }
 
-/**
- * The summary row for one conversation. It carries the same TTL as the
- * message rows it describes, so history never outlives the transcripts it
- * would offer to open.
- */
-export function toSessionIndexItem(
+export function sessionIndexKey(
   visitorId: string,
+  sessionId: string
+): { pk: string; sk: string } {
+  return { pk: visitorKey(visitorId), sk: sessionKey(sessionId) };
+}
+
+export type SessionIndexUpdate = {
+  UpdateExpression: string;
+  ExpressionAttributeNames: Record<string, string>;
+  ExpressionAttributeValues: Record<string, unknown>;
+};
+
+/**
+ * A `SET` of named attributes. Every attribute goes through a `#alias` rather
+ * than being named inline, because DynamoDB's reserved word list is long
+ * enough that checking each new attribute against it is not worth the risk of
+ * a runtime `ValidationException` on a name that reads as ordinary English.
+ */
+function setAttributes(
+  attributes: Record<string, unknown>
+): SessionIndexUpdate {
+  const entries = Object.entries(attributes);
+  return {
+    UpdateExpression: `SET ${entries
+      .map(([name]) => `#${name} = :${name}`)
+      .join(", ")}`,
+    ExpressionAttributeNames: Object.fromEntries(
+      entries.map(([name]) => [`#${name}`, name])
+    ),
+    ExpressionAttributeValues: Object.fromEntries(
+      entries.map(([name, value]) => [`:${name}`, value])
+    ),
+  };
+}
+
+/**
+ * The summary row for one conversation, written on every turn. It carries the
+ * same TTL as the message rows it describes, so history never outlives the
+ * transcripts it would offer to open.
+ *
+ * This is an update of named attributes and not a whole-item put because the
+ * row also holds state the visitor set by hand: a put on the next turn would
+ * silently unpin, unarchive, and un-rename a conversation the moment it was
+ * spoken to again.
+ */
+export function sessionIndexUpdate(
   sessionId: string,
   messages: ChatMessage[],
   at: Date
-): SessionIndexItem {
-  return {
-    pk: visitorKey(visitorId),
-    sk: sessionKey(sessionId),
+): SessionIndexUpdate {
+  return setAttributes({
     entity: "session_index",
     expires_at: Math.floor(at.getTime() / 1000) + SESSION_TTL_SECONDS,
     session_id: sessionId,
     last_message_at: at.toISOString(),
     preview: sessionPreview(messages),
-  };
+  });
 }
+
+/**
+ * A visitor's own change to a conversation, or null when the patch asks for
+ * nothing. A rename sets `title_is_custom` in the same write as the title, so
+ * there is no window in which a custom title is not yet flagged as one.
+ *
+ * The TTL is deliberately not touched: archiving hides a conversation, and
+ * pinning promotes it, but neither is meant to change when the demo's
+ * twelve-hour retention reclaims it.
+ */
+export function sessionPatchUpdate(patch: {
+  pinned?: boolean;
+  archived?: boolean;
+  title?: string;
+}): SessionIndexUpdate | null {
+  const attributes: Record<string, unknown> = {};
+  if (patch.pinned !== undefined) {
+    attributes.pinned = patch.pinned;
+  }
+  if (patch.archived !== undefined) {
+    attributes.archived = patch.archived;
+  }
+  if (patch.title !== undefined) {
+    attributes.title = patch.title;
+    attributes.title_is_custom = true;
+  }
+  return Object.keys(attributes).length === 0
+    ? null
+    : setAttributes(attributes);
+}
+
+/** An automatic title. Callers pair this with the condition below. */
+export function generatedTitleUpdate(title: string): SessionIndexUpdate {
+  return setAttributes({ title });
+}
+
+/**
+ * The condition an automatic title is written under. A conversation the
+ * visitor has already renamed keeps that name, and this is expressed as a
+ * condition rather than a read-then-write because the rename and the title
+ * generation are concurrent requests: a check in the process would still lose
+ * a rename that lands between the read and the write.
+ */
+export const GENERATED_TITLE_CONDITION =
+  "attribute_exists(pk) AND attribute_not_exists(title_is_custom)";
+
+/** A patch may only change a conversation that exists in the caller's history. */
+export const EXISTING_SESSION_CONDITION = "attribute_exists(pk)";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -238,22 +339,38 @@ export function toSessionSummary(item: unknown): SessionSummary | null {
     id,
     lastMessageAt,
     preview: typeof preview === "string" ? preview : "",
+    title:
+      typeof item.title === "string" && item.title.length > 0
+        ? item.title
+        : null,
+    pinned: item.pinned === true,
+    archived: item.archived === true,
   };
 }
 
 /**
- * Newest first, capped. The sort key is the conversation id, so recency is an
- * attribute rather than the stored order; a visitor's partition holds one row
- * per conversation inside a twelve-hour window, so sorting it in the process
- * is cheaper than the second write an ordered sort key would need on every
- * turn to avoid leaving a stale row behind.
+ * Pinned conversations first, then everything else, each group newest first,
+ * capped. Pinning reorders the list and nothing else: it does not touch
+ * recency, so a pinned conversation keeps its chronological place among the
+ * other pinned ones rather than jumping around when it is pinned.
+ *
+ * The sort key is the conversation id, so recency is an attribute rather than
+ * the stored order; a visitor's partition holds one row per conversation
+ * inside a twelve-hour window, so sorting it in the process is cheaper than
+ * the second write an ordered sort key would need on every turn to avoid
+ * leaving a stale row behind.
  */
-export function sortSessionsNewestFirst(
+export function sortSessionsForHistory(
   sessions: SessionSummary[],
   limit: number
 ): SessionSummary[] {
   return [...sessions]
-    .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt))
+    .sort((a, b) => {
+      if (a.pinned !== b.pinned) {
+        return a.pinned ? -1 : 1;
+      }
+      return b.lastMessageAt.localeCompare(a.lastMessageAt);
+    })
     .slice(0, limit);
 }
 

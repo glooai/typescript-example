@@ -93,10 +93,22 @@ export type SessionSummary = {
   lastMessageAt: string;
   /** The conversation's opening question, collapsed and truncated. */
   preview: string;
+  /** Auto-generated or user-supplied label; null until either has happened. */
+  title: string | null;
+  pinned: boolean;
+  archived: boolean;
 };
 
 export type SessionsResponse = {
   sessions: SessionSummary[];
+};
+
+/** `PATCH /api/session?id=<id>` request body. Every field is optional. */
+export type SessionPatch = {
+  pinned?: boolean;
+  archived?: boolean;
+  /** A rename. Setting this marks the title as the visitor's own, for good. */
+  title?: string;
 };
 
 /** Trimmed `/platform/v2/models` entry, as re-served by `GET /api/models`. */

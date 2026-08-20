@@ -7,7 +7,13 @@
  * `model_family`, or `model`). Sending two is a 400 from the platform.
  */
 import { z } from "zod";
-import type { ChatRequest, CompareRequest, RoutingSelection } from "./types.js";
+import { TITLE_MAX_CHARS } from "./title.js";
+import type {
+  ChatRequest,
+  CompareRequest,
+  RoutingSelection,
+  SessionPatch,
+} from "./types.js";
 
 /** Families the platform accepts for `model_family` routing. */
 export const MODEL_FAMILIES = [
@@ -88,6 +94,23 @@ export const compareRequestSchema: z.ZodType<CompareRequest> = z.object({
     .min(2)
     .max(LIMITS.maxCompareVariants),
 });
+
+/**
+ * A change to one conversation's history entry. Every field is optional but
+ * the body must ask for something, so an empty object is a 400 rather than a
+ * write that touches nothing. The title bound is the same cap the generated
+ * titles are held to, enforced here so a rename cannot be the one way a title
+ * longer than the list row can hold gets into the table.
+ */
+export const sessionPatchSchema: z.ZodType<SessionPatch> = z
+  .object({
+    pinned: z.boolean().optional(),
+    archived: z.boolean().optional(),
+    title: z.string().min(1).max(TITLE_MAX_CHARS).optional(),
+  })
+  .refine((patch) => Object.keys(patch).length > 0, {
+    message: "nothing to change",
+  });
 
 /**
  * Human-readable label for what the caller asked for, before Gloo resolves
