@@ -26,7 +26,7 @@ const SUGGESTIONS = [
 
 function MetricsStrip({ metrics }: { metrics: CallMetrics }) {
   return (
-    <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 border-t border-ink-800 pt-3">
+    <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 border-t border-line pt-3">
       <Stat
         label="Resolved model"
         value={shortModelName(metrics.resolvedModel)}
@@ -154,17 +154,14 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
       >
         {turns.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-            <p className="text-sm text-ink-500">
-              Ask something. Responses stream through a Lambda proxy that never
-              exposes the API key.
-            </p>
+            <p className="text-sm text-muted">Ask something to get started.</p>
             <div className="flex flex-wrap justify-center gap-2">
               {SUGGESTIONS.map((suggestion) => (
                 <button
                   key={suggestion}
                   type="button"
                   onClick={() => void send(suggestion)}
-                  className="rounded-full border border-ink-800 bg-ink-900 px-3.5 py-1.5 text-xs text-ink-300 transition hover:border-gold-500 hover:text-ink-100"
+                  className="rounded-full border border-line bg-surface px-3.5 py-1.5 text-xs text-soft transition hover:border-accent hover:text-body"
                 >
                   {suggestion}
                 </button>
@@ -176,7 +173,7 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
         {turns.map((turn, index) =>
           turn.role === "user" ? (
             <div key={index} className="flex justify-end">
-              <p className="max-w-[80%] rounded-2xl rounded-br-md bg-ink-800 px-4 py-2.5 text-sm whitespace-pre-wrap">
+              <p className="max-w-[80%] rounded-2xl rounded-br-md bg-raised px-4 py-2.5 text-sm whitespace-pre-wrap">
                 {turn.content}
               </p>
             </div>
@@ -189,7 +186,7 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
         )}
 
         {streamingEmpty && (
-          <p className="px-1 text-sm text-ink-500">Routing your request</p>
+          <p className="px-1 text-sm text-muted">Routing your request</p>
         )}
       </div>
 
@@ -207,13 +204,13 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
           placeholder="Send a message"
           aria-label="Message"
           disabled={busy}
-          className="flex-1 rounded-xl border border-ink-800 bg-ink-900 px-4 py-3 text-sm outline-none transition placeholder:text-ink-500 focus:border-gold-500 disabled:opacity-60"
+          className="flex-1 rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none transition placeholder:text-muted focus:border-accent disabled:opacity-60"
         />
         {busy ? (
           <button
             type="button"
             onClick={() => abortRef.current?.abort()}
-            className="rounded-xl border border-ink-700 px-5 py-3 text-sm font-medium text-ink-300 transition hover:text-ink-100"
+            className="rounded-xl border border-line-strong px-5 py-3 text-sm font-medium text-soft transition hover:text-body"
           >
             Stop
           </button>
@@ -221,7 +218,7 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
           <button
             type="submit"
             disabled={input.trim().length === 0}
-            className="rounded-xl bg-gold-500 px-5 py-3 text-sm font-semibold text-ink-950 transition hover:bg-gold-400 disabled:opacity-40"
+            className="rounded-xl bg-accent-solid px-5 py-3 text-sm font-semibold text-on-accent transition hover:bg-accent-solid-hover disabled:opacity-40"
           >
             Send
           </button>
