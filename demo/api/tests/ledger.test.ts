@@ -8,7 +8,12 @@ import {
   sortRowsNewestFirst,
   toLedgerItem,
   toLedgerRow,
+  toSessionIndexItem,
   toSessionItems,
+  toSessionSummary,
+  sessionPreview,
+  sortSessionsNewestFirst,
+  visitorKey,
 } from "../src/ledger.js";
 import type { CallMetrics, LedgerRow } from "../src/types.js";
 import type { VisitorTrace } from "../src/visitor.js";
@@ -154,6 +159,154 @@ describe("toSessionItems", () => {
 
     expect(first?.visitor_id).toBeUndefined();
     expect(first?.content).toBe("hello");
+  });
+});
+
+describe("sessionPreview", () => {
+  it("labels a conversation with its opening question, on one line", () => {
+    expect(
+      sessionPreview([
+        { role: "user", content: "  How does\n  Psalm 23 read?  " },
+        { role: "assistant", content: "It reads..." },
+      ])
+    ).toBe("How does Psalm 23 read?");
+  });
+
+  it("ignores a leading assistant turn and reads the first user one", () => {
+    expect(
+      sessionPreview([
+        { role: "assistant", content: "Ask something to get started." },
+        { role: "user", content: "Grace and mercy?" },
+      ])
+    ).toBe("Grace and mercy?");
+  });
+
+  it("truncates a long prompt to a list label", () => {
+    const preview = sessionPreview([
+      { role: "user", content: "a".repeat(400) },
+    ]);
+
+    expect(preview.endsWith("...")).toBe(true);
+    expect(preview.length).toBeLessThanOrEqual(123);
+  });
+
+  it("is empty for a conversation with no user text yet", () => {
+    expect(sessionPreview([])).toBe("");
+  });
+});
+
+describe("toSessionIndexItem", () => {
+  const messages = [
+    { role: "user" as const, content: "hello" },
+    { role: "assistant" as const, content: "hi there" },
+  ];
+
+  it("keys one summary row per conversation under the visitor", () => {
+    const item = toSessionIndexItem(
+      trace.visitor_id,
+      "session-abc12345",
+      messages,
+      at
+    );
+
+    expect(item.pk).toBe(visitorKey(trace.visitor_id));
+    expect(item.sk).toBe("SESSION#session-abc12345");
+    expect(item.entity).toBe("session_index");
+    expect(item.session_id).toBe("session-abc12345");
+    expect(item.last_message_at).toBe(at.toISOString());
+    expect(item.preview).toBe("hello");
+  });
+
+  it("overwrites its own row on a later turn instead of adding one", () => {
+    const later = new Date(at.getTime() + 60_000);
+    const first = toSessionIndexItem(
+      trace.visitor_id,
+      "session-abc12345",
+      messages,
+      at
+    );
+    const second = toSessionIndexItem(
+      trace.visitor_id,
+      "session-abc12345",
+      [...messages, { role: "user" as const, content: "and again" }],
+      later
+    );
+
+    expect(second.pk).toBe(first.pk);
+    expect(second.sk).toBe(first.sk);
+    expect(second.last_message_at).toBe(later.toISOString());
+  });
+
+  it("expires with the transcript it describes", () => {
+    const item = toSessionIndexItem(
+      trace.visitor_id,
+      "session-abc12345",
+      messages,
+      at
+    );
+
+    expect(item.expires_at).toBe(
+      Math.floor(at.getTime() / 1000) + SESSION_TTL_SECONDS
+    );
+  });
+});
+
+describe("toSessionSummary", () => {
+  it("reads a stored row back", () => {
+    const item = toSessionIndexItem(
+      trace.visitor_id,
+      "session-abc12345",
+      [{ role: "user", content: "hello" }],
+      at
+    );
+
+    expect(toSessionSummary(item)).toEqual({
+      id: "session-abc12345",
+      lastMessageAt: at.toISOString(),
+      preview: "hello",
+    });
+  });
+
+  it("keeps an unlabelled conversation rather than dropping it", () => {
+    expect(
+      toSessionSummary({
+        session_id: "session-abc12345",
+        last_message_at: at.toISOString(),
+      })
+    ).toEqual({
+      id: "session-abc12345",
+      lastMessageAt: at.toISOString(),
+      preview: "",
+    });
+  });
+
+  it("drops rows that could not be opened or ordered", () => {
+    expect(toSessionSummary(null)).toBeNull();
+    expect(toSessionSummary("SESSION#x")).toBeNull();
+    expect(toSessionSummary({ last_message_at: at.toISOString() })).toBeNull();
+    expect(toSessionSummary({ session_id: "s-1" })).toBeNull();
+    expect(
+      toSessionSummary({ session_id: "s-1", last_message_at: "not a date" })
+    ).toBeNull();
+    expect(
+      toSessionSummary({ session_id: 42, last_message_at: at.toISOString() })
+    ).toBeNull();
+  });
+});
+
+describe("sortSessionsNewestFirst", () => {
+  it("orders by last message and applies the cap", () => {
+    const sessions = [
+      { id: "a", lastMessageAt: "2026-08-11T09:00:00.000Z", preview: "a" },
+      { id: "b", lastMessageAt: "2026-08-11T11:00:00.000Z", preview: "b" },
+      { id: "c", lastMessageAt: "2026-08-11T10:00:00.000Z", preview: "c" },
+    ];
+
+    expect(sortSessionsNewestFirst(sessions, 2).map((s) => s.id)).toEqual([
+      "b",
+      "c",
+    ]);
+    expect(sessions[0]?.id).toBe("a");
   });
 });
 

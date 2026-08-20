@@ -87,6 +87,18 @@ export type LedgerResponse = {
   rollups: LedgerModelRollup[];
 };
 
+/** One entry of `GET /api/sessions`: a past conversation, listed not replayed. */
+export type SessionSummary = {
+  id: string;
+  lastMessageAt: string;
+  /** The conversation's opening question, collapsed and truncated. */
+  preview: string;
+};
+
+export type SessionsResponse = {
+  sessions: SessionSummary[];
+};
+
 /** Trimmed `/platform/v2/models` entry, as re-served by `GET /api/models`. */
 export type ModelSummary = {
   id: string;

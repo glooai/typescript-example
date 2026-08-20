@@ -10,7 +10,7 @@
  * into a chunked HTTP response keeps that and drops the runtime-specific
  * `awslambda.HttpResponseStream` shim.
  *
- * `node:http` rather than a framework: the surface is five fixed routes with
+ * `node:http` rather than a framework: the surface is six fixed routes with
  * hand-written JSON bodies, and the one route that matters streams raw
  * frames into the socket, which is exactly the layer any framework would
  * have to be talked out of the way of.
@@ -62,6 +62,12 @@ const LEDGER_PAGE_SIZE = 200;
  * the read means a client cannot make the process buffer without bound.
  */
 const MAX_BODY_BYTES = 256 * 1024;
+
+/**
+ * Conversations expire after twelve hours, so a visitor's history is short by
+ * construction; this only bounds the pathological case.
+ */
+const SESSION_PAGE_SIZE = 50;
 
 /**
  * The ALB's own idle timeout is 60s and it, not the target, is meant to
@@ -348,6 +354,26 @@ async function handleSession(
   );
 }
 
+/**
+ * The conversations belonging to the caller's own visitor id. The id comes
+ * from the cookie and never from the query string, so this route cannot be
+ * used to read someone else's history by guessing an id.
+ */
+async function handleSessions(
+  response: ServerResponse,
+  store: Store,
+  visitor: VisitorContext
+): Promise<void> {
+  respond(
+    response,
+    200,
+    {
+      sessions: await store.listSessions(visitor.visitorId, SESSION_PAGE_SIZE),
+    },
+    visitorHeaders(visitor)
+  );
+}
+
 async function route(
   request: IncomingMessage,
   response: ServerResponse,
@@ -413,6 +439,10 @@ async function route(
   }
   if (method === "GET" && path === "/api/session") {
     await handleSession(response, url, deps.store, visitor);
+    return;
+  }
+  if (method === "GET" && path === "/api/sessions") {
+    await handleSessions(response, deps.store, visitor);
     return;
   }
   respond(response, 404, { error: "not found" });

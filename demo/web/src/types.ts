@@ -49,6 +49,13 @@ export type LedgerModelRollup = {
   avgCompletionTokens: number;
 };
 
+/** One past conversation, as listed by `GET /api/sessions`. */
+export type SessionSummary = {
+  id: string;
+  lastMessageAt: string;
+  preview: string;
+};
+
 export type ModelSummary = {
   id: string;
   name: string;

@@ -153,23 +153,48 @@ not fix either and would drop live streams to do it.
 
 ## Data model
 
-One DynamoDB table, pay-per-request, TTL on `expires_at`. Two entity types:
+One DynamoDB table, pay-per-request, TTL on `expires_at`. Three entity types:
 
-| Key                                        | Why it exists                                                                                                                           |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `pk = LEDGER#<UTC date>`, `sk = <ts>#<id>` | One row per proxied call, so the cost and latency view reports measured traffic instead of registry arithmetic. Expires after 7 days.   |
-| `pk = SESSION#<id>`, `sk = MSG#<seq>`      | One row per chat message, so a demo conversation survives a page refresh without any server-side session store. Expires after 12 hours. |
+| Key                                        | Why it exists                                                                                                                            |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `pk = LEDGER#<UTC date>`, `sk = <ts>#<id>` | One row per proxied call, so the cost and latency view reports measured traffic instead of registry arithmetic. Expires after 7 days.    |
+| `pk = SESSION#<id>`, `sk = MSG#<seq>`      | One row per chat message, so a demo conversation survives a page refresh without any server-side session store. Expires after 12 hours.  |
+| `pk = VISITOR#<id>`, `sk = SESSION#<id>`   | One summary row per conversation a visitor has had, so the Chat view can list past conversations and reopen one. Expires after 12 hours. |
 
-Both entity types also carry an anonymous visitor trace, described below.
+The ledger and message rows also carry an anonymous visitor trace, described
+below.
 
 DynamoDB rather than Postgres because it costs nothing at rest, needs no
-migration before a deploy, and there is nothing relational about two
-independent key-addressed entity types. No secondary indexes, because every
-read is a Query against a known partition key. The ledger partition is the
+migration before a deploy, and there is nothing relational about
+key-addressed entity types. No secondary indexes, because every read is a
+Query against a known partition key. The ledger partition is the
 UTC calendar day rather than a constant, so writes rotate instead of
 concentrating on one partition forever; a read fans one Query out per day in
 the seven-day retention window and merges the results, which is what gives
 the Observed charts something to plot a trend across.
+
+### Chat history
+
+The summary row is what makes `GET /api/sessions` a single Query. The
+alternative, a global secondary index keyed on the visitor id over the message
+rows, would project every message of every conversation into the index, bill
+for that second copy of the transcripts, and still need a dedupe per
+conversation on the read. One row per conversation, written in the same
+`BatchWriteItem` as the transcript, costs a single extra write unit per turn
+and reads back in one Query, which is the pattern the rest of this table
+already follows.
+
+The sort key is the conversation id rather than its timestamp, so a
+conversation that is rewritten on every turn overwrites its own summary
+instead of leaving a trail of stale rows; recency is an attribute and the
+handful of rows in a visitor's partition are ordered in the process. The
+summary carries the same twelve-hour TTL as the messages it describes, so
+history never offers a conversation whose transcript has already expired.
+
+The visitor id comes from the cookie and never from the query string, so the
+route only ever lists the caller's own conversations. A browser with no
+cookie is issued a fresh id per request, gets an empty list, and sees "No past
+chats yet." instead of an error.
 
 Costs are computed from the live `platform/v2/models` registry (which
 publishes per-million-token rates) multiplied by the token counts Gloo
