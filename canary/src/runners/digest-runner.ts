@@ -1,31 +1,24 @@
 /**
- * Digest runner — summarizes the last 7 days (168h) of probe runs into one
+ * Digest runner - summarizes the last 7 days (168h) of probe runs into one
  * Slack top-level post plus a structured thread.
  *
- * Top-level post shows ONLY the signal:
- *   - Every probe whose worst severity in the window was RED
- *   - Every probe whose worst severity in the window was YELLOW
- *   - One roll-up line counting the fully-green probes
- * The goal is that a reader glancing at the channel can see exactly what
- * needs attention in a few lines, not scroll past 22 identical green
- * bullets to find the two broken ones.
+ * The top-level post carries only the probes that need attention plus a
+ * roll-up count of the fully-green ones; the per-probe detail lives in
+ * thread replies. A reader glancing at the channel should see the two
+ * broken probes without scrolling past twenty identical green bullets.
  *
- * Thread replies (posted against the top-level) carry the detail:
- *   - One consolidated "all green" post listing every probe that stayed
- *     fully green in the window (signature + p50/p99)
- *   - One individualized breakdown per YELLOW probe
- *   - One individualized breakdown per RED probe (verdict + status mix,
- *     most recent failure timestamp, full latency distribution)
- *
- * Also reports archival state: object count, oldest age, total bytes.
- * (Actual pruning is handled by the GCS object-lifecycle rule — this
- * function is read-only against the archive.)
+ * Archival state is reported read-only - pruning is handled by the GCS
+ * object-lifecycle rule, not by this job.
  */
 
 import type { CanaryConfig } from "../config.js";
 import { currentProbeSignatures } from "../fixtures/index.js";
 import type { ModelRegistryDelta } from "../fixtures/model-registry-delta.js";
-import type { GcsClient, RunArtifact } from "../sinks/gcs.js";
+import {
+  runHourPrefix,
+  type GcsClient,
+  type RunArtifact,
+} from "../sinks/gcs.js";
 import { loadLatestSnapshot } from "../sinks/model-registry-snapshot.js";
 import type { SlackClient } from "../sinks/slack.js";
 import type { Severity, Verdict } from "../probes/types.js";
@@ -36,26 +29,17 @@ export type DigestDeps = {
 };
 
 /**
- * One individual outcome in the 24h window. We keep just the fields the
- * per-probe thread reply needs so the digest summary stays compact —
- * the full response payloads already live in the per-failure
- * `Canary RED` top-level alerts and in GCS-archived run artifacts.
+ * One outcome in the window, trimmed to the fields the per-probe thread
+ * reply needs. Full response payloads already live in the per-failure
+ * `Canary RED` alerts and in the GCS-archived run artifacts.
  */
 export type PerProbeOutcomeSample = {
   verdict: Verdict;
   httpStatus: number | null;
   durationMs: number;
-  /** Unix seconds — same as ProbeOutcome.completedAt. */
+  /** Unix seconds - same as ProbeOutcome.completedAt. */
   completedAt: number;
 };
-
-/**
- * Legacy alias. The thread formatters used to be named "failure" because
- * they only rendered RED outcomes; the YELLOW thread formatter shares the
- * same shape, so the underlying type is named more neutrally now. Kept as
- * an alias so downstream imports don't churn.
- */
-export type PerProbeFailure = PerProbeOutcomeSample;
 
 export type PerProbeEntry = {
   signature: string;
@@ -67,21 +51,11 @@ export type PerProbeEntry = {
   yellowing: number;
   p50Ms: number;
   p99Ms: number;
-  /**
-   * Worst severity observed for this signature across the window. Used
-   * to partition probes into the red / yellow / green buckets the top
-   * level and threads render.
-   */
+  /** Worst severity across the window - drives the red/yellow/green bucketing. */
   worstSeverity: Severity;
-  /**
-   * RED outcome details for the threaded breakdown — only populated when
-   * the probe had at least one RED outcome. Sorted oldest → newest.
-   */
+  /** RED outcome details for the threaded breakdown, sorted oldest to newest. */
   failures: PerProbeOutcomeSample[];
-  /**
-   * YELLOW outcome details for the threaded breakdown — only populated
-   * when the probe had at least one YELLOW outcome. Sorted oldest → newest.
-   */
+  /** YELLOW outcome details for the threaded breakdown, sorted oldest to newest. */
   yellowOutcomes: PerProbeOutcomeSample[];
 };
 
@@ -94,11 +68,10 @@ export type DigestSummary = {
   verdictCounts: Record<Verdict, number>;
   perProbe: PerProbeEntry[];
   /**
-   * Most recent registry-delta event in the window, if any. We only
-   * surface the latest change rather than every intermediate diff — if
-   * the registry toggled mid-window (e.g. a model was removed and
-   * re-added) the latest snapshot is the one that actually matters for
-   * the reader's current mental model of what's callable.
+   * Most recent registry-delta event in the window, if any. Only the latest
+   * change is surfaced: if the registry toggled mid-window (a model removed
+   * then re-added) the latest snapshot is the one that matches what is
+   * callable right now.
    */
   latestRegistryDelta: ModelRegistryDelta | null;
   archival: {
@@ -108,34 +81,29 @@ export type DigestSummary = {
   };
 };
 
-/** ms in one hour — used for window math. */
 const ONE_HOUR_MS = 3_600_000;
 
 /**
- * How far back the digest window looks. Set to 168h (7 days) to match the
- * weekly probe cadence — a 24h window would only ever contain the single
- * Monday morning run and would silently look empty on any other day of the
- * week. 168h ensures the weekly digest always has a full week's worth of
- * probe artifacts to summarize, regardless of when exactly the digest job fires.
+ * 168h (7 days) to match the weekly probe cadence. A 24h window would only
+ * ever contain the single Monday morning run and would look empty on any
+ * other day of the week.
  */
 const WINDOW_HOURS = 168;
 
 /**
- * List run artifacts strictly within the last WINDOW_HOURS. We over-fetch
- * hourly prefixes (WINDOW_HOURS + 2 covers day-boundary UTC offsets cleanly)
- * and then filter the returned artifacts by their `startedAt` so the digest
- * reflects exactly the promised window, not ~WINDOW_HOURS+2h.
+ * We over-fetch hourly prefixes (WINDOW_HOURS + 2 covers day-boundary UTC
+ * offsets and clock skew) and then filter the returned artifacts by their
+ * `startedAt` so the digest reflects exactly the promised window.
  */
 export async function loadWindow(
   gcs: GcsClient,
   now: Date = new Date()
 ): Promise<RunArtifact[]> {
-  const prefix24h = buildRunPrefixes(now);
   const seen = new Set<string>();
   const artifacts: RunArtifact[] = [];
   const cutoffMs = now.getTime() - WINDOW_HOURS * ONE_HOUR_MS;
 
-  for (const prefix of prefix24h) {
+  for (const prefix of buildRunPrefixes(now)) {
     const names = await gcs.list(prefix);
     for (const name of names) {
       if (seen.has(name)) continue;
@@ -151,26 +119,16 @@ export async function loadWindow(
   );
 }
 
-/**
- * Build the set of GCS prefixes that cover the last WINDOW_HOURS. Because we
- * partition by hour, we enumerate WINDOW_HOURS + 2 hours ending at `now` to
- * cleanly cover day-boundary UTC offsets — the extra 2h acts as a buffer so
- * no artifact at the edge of the window is missed due to clock skew.
- */
+/** Hourly GCS prefixes covering the window, plus a 2h edge buffer. */
 export function buildRunPrefixes(now: Date): string[] {
   const out = new Set<string>();
   for (let hoursBack = 0; hoursBack < WINDOW_HOURS + 2; hoursBack++) {
-    const t = new Date(now.getTime() - hoursBack * 3_600_000);
-    const y = t.getUTCFullYear();
-    const m = String(t.getUTCMonth() + 1).padStart(2, "0");
-    const d = String(t.getUTCDate()).padStart(2, "0");
-    const h = String(t.getUTCHours()).padStart(2, "0");
-    out.add(`runs/${y}/${m}/${d}/${h}`);
+    out.add(runHourPrefix(new Date(now.getTime() - hoursBack * ONE_HOUR_MS)));
   }
   return Array.from(out);
 }
 
-/** RED > YELLOW > GREEN. Used to bucket probes by their worst window outcome. */
+/** RED > YELLOW > GREEN. */
 function worstOf(current: Severity, next: Severity): Severity {
   if (current === "RED" || next === "RED") return "RED";
   if (current === "YELLOW" || next === "YELLOW") return "YELLOW";
@@ -179,13 +137,23 @@ function worstOf(current: Severity, next: Severity): Severity {
 
 export type SummarizeOptions = {
   /**
-   * When provided, outcomes whose signature is not in this set are
-   * skipped entirely — not counted toward probesRun, severityCounts,
-   * verdictCounts, or perProbe. Use this to filter retired-from-probe
-   * signatures whose archived outcomes still live in the 24h window.
-   * Pass null to disable filtering (legacy / fail-open behavior).
+   * When provided, outcomes whose signature is not in this set are skipped
+   * entirely - not counted toward probesRun, severityCounts, verdictCounts,
+   * or perProbe. Used to drop retired signatures whose archived outcomes are
+   * still inside the window. Pass null to disable filtering (fail-open).
    */
   allowedSignatures?: Set<string> | null;
+};
+
+type ProbeAggregate = {
+  label: string;
+  durations: number[];
+  passing: number;
+  failing: number;
+  yellowing: number;
+  worstSeverity: Severity;
+  failures: PerProbeOutcomeSample[];
+  yellowOutcomes: PerProbeOutcomeSample[];
 };
 
 export function summarize(
@@ -196,19 +164,7 @@ export function summarize(
 ): DigestSummary {
   const earliest = artifacts[0]?.startedAt ?? now.toISOString();
   const allowed = options.allowedSignatures ?? null;
-  const perProbeAgg = new Map<
-    string,
-    {
-      label: string;
-      durations: number[];
-      passing: number;
-      failing: number;
-      yellowing: number;
-      worstSeverity: Severity;
-      failures: PerProbeOutcomeSample[];
-      yellowOutcomes: PerProbeOutcomeSample[];
-    }
-  >();
+  const perProbeAgg = new Map<string, ProbeAggregate>();
   const severityCounts: Record<Severity, number> = {
     RED: 0,
     YELLOW: 0,
@@ -230,22 +186,15 @@ export function summarize(
   };
 
   let probesRun = 0;
-  // Count registry additions/removals toward the YELLOW severity counter so
-  // the top-level `🔴 N 🟡 N 🟢 N` summary reflects registry events as
-  // yellow-severity signals. Registry changes are "something shifted, not
-  // necessarily broken" — exactly what YELLOW means in this schema. Red is
-  // reserved for probes that target a currently-supported model and fail.
   for (const artifact of artifacts) {
+    // Registry adds/removes count as YELLOW: "something shifted, not
+    // necessarily broken". RED stays reserved for probes that target a
+    // currently-supported model and fail.
     const delta = artifact.registryDelta;
     if (delta && delta.hasChanges) {
       severityCounts.YELLOW += delta.added.length + delta.removed.length;
     }
     for (const outcome of artifact.outcomes) {
-      // Skip outcomes whose signature is no longer in the current probe
-      // set — e.g., old archived runs for a model that's since been
-      // retired from the registry. Their historical red/yellow verdicts
-      // shouldn't drive "Needs attention" on today's digest because
-      // today's canary isn't probing them.
       if (allowed !== null && !allowed.has(outcome.signature)) continue;
       probesRun++;
       severityCounts[outcome.severity]++;
@@ -283,6 +232,11 @@ export function summarize(
     }
   }
 
+  const byCompletedAt = (
+    a: PerProbeOutcomeSample,
+    b: PerProbeOutcomeSample
+  ): number => a.completedAt - b.completedAt;
+
   const perProbe: PerProbeEntry[] = Array.from(perProbeAgg.entries()).map(
     ([signature, entry]) => ({
       signature,
@@ -294,12 +248,8 @@ export function summarize(
       worstSeverity: entry.worstSeverity,
       p50Ms: percentile(entry.durations, 0.5),
       p99Ms: percentile(entry.durations, 0.99),
-      failures: [...entry.failures].sort(
-        (a, b) => a.completedAt - b.completedAt
-      ),
-      yellowOutcomes: [...entry.yellowOutcomes].sort(
-        (a, b) => a.completedAt - b.completedAt
-      ),
+      failures: [...entry.failures].sort(byCompletedAt),
+      yellowOutcomes: [...entry.yellowOutcomes].sort(byCompletedAt),
     })
   );
   perProbe.sort((a, b) => a.label.localeCompare(b.label));
@@ -318,12 +268,9 @@ export function summarize(
 }
 
 /**
- * Walk `artifacts` newest-last and return the most recent registry
- * delta that is either a first snapshot or has add/remove changes. We
- * ignore deltas with `hasChanges=false && isFirstSnapshot=false` because
- * those are the steady-state "no change" case and would never be
- * rendered — returning null for that case keeps the digest post quieter
- * when nothing interesting happened to the registry in the window.
+ * Most recent delta that is either a first snapshot or has add/remove
+ * changes. Steady-state "no change" deltas are ignored so the digest post
+ * stays quiet when nothing interesting happened to the registry.
  */
 export function pickLatestRegistryDelta(
   artifacts: RunArtifact[]
@@ -370,6 +317,26 @@ export async function gatherArchivalState(
   return { objectCount: names.length, totalBytes, oldestAgeDays };
 }
 
+/**
+ * Thread replies are posted independently and best-effort: one bad post
+ * (rate limit, missing scope, transient blip) must not skip the rest.
+ */
+async function postThreadReply(
+  slack: SlackClient,
+  threadTs: string,
+  text: string,
+  context: string
+): Promise<void> {
+  try {
+    await slack.post({ text, threadTs });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `slack.post (digest ${context} thread) failed: ${(error as Error).message}`
+    );
+  }
+}
+
 export async function runDigest(
   config: CanaryConfig,
   deps: DigestDeps,
@@ -378,11 +345,9 @@ export async function runDigest(
   const artifacts = await loadWindow(deps.gcs, now);
   const archival = await gatherArchivalState(deps.gcs, now);
 
-  // Fetch the current probe signature set from the most recent registry
-  // snapshot. Falls back to null (no filter) if the snapshot blob is
-  // missing — e.g., very first digest after deploy, before any probe
-  // has written the snapshot. Fail-open on purpose: a missing snapshot
-  // must not silence the canary's top-level alerts.
+  // Falls back to null (no filter) when the snapshot blob is missing - e.g.
+  // the very first digest after deploy. Fail-open on purpose: a missing
+  // snapshot must not silence the canary's top-level alerts.
   const snapshot = await loadLatestSnapshot(deps.gcs);
   const allowedSignatures = snapshot
     ? new Set(
@@ -392,61 +357,36 @@ export async function runDigest(
 
   const summary = summarize(artifacts, archival, now, { allowedSignatures });
 
-  const topLevel = formatDigestTopLevel(summary);
-  const posted = await deps.slack.post({ text: topLevel });
+  const posted = await deps.slack.post({ text: formatDigestTopLevel(summary) });
 
-  const greenProbes = summary.perProbe.filter(
-    (p) => p.worstSeverity === "GREEN"
-  );
-  const yellowProbes = summary.perProbe.filter(
-    (p) => p.worstSeverity === "YELLOW"
-  );
-  const redProbes = summary.perProbe.filter((p) => p.worstSeverity === "RED");
+  const bySeverity = (severity: Severity): PerProbeEntry[] =>
+    summary.perProbe.filter((p) => p.worstSeverity === severity);
+  const greenProbes = bySeverity("GREEN");
 
-  // All-green probes roll up into a single thread reply so the channel
-  // stays scannable but the detail is one click away.
   if (greenProbes.length > 0) {
-    try {
-      await deps.slack.post({
-        text: formatAllGreenThread(greenProbes),
-        threadTs: posted.ts,
-      });
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        `slack.post (digest all-green thread) failed: ${(error as Error).message}`
-      );
-    }
+    await postThreadReply(
+      deps.slack,
+      posted.ts,
+      formatAllGreenThread(greenProbes),
+      "all-green"
+    );
   }
 
-  // Individualized thread replies per YELLOW and RED probe. Posted
-  // independently so a single bad reply (rate limit, scope missing,
-  // transient blip) doesn't skip the rest.
-  for (const probe of yellowProbes) {
-    try {
-      await deps.slack.post({
-        text: formatProbeYellowThread(probe),
-        threadTs: posted.ts,
-      });
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        `slack.post (digest yellow thread ${probe.signature}) failed: ${(error as Error).message}`
-      );
-    }
+  for (const probe of bySeverity("YELLOW")) {
+    await postThreadReply(
+      deps.slack,
+      posted.ts,
+      formatProbeYellowThread(probe),
+      `yellow ${probe.signature}`
+    );
   }
-  for (const probe of redProbes) {
-    try {
-      await deps.slack.post({
-        text: formatProbeFailureThread(probe),
-        threadTs: posted.ts,
-      });
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        `slack.post (digest red thread ${probe.signature}) failed: ${(error as Error).message}`
-      );
-    }
+  for (const probe of bySeverity("RED")) {
+    await postThreadReply(
+      deps.slack,
+      posted.ts,
+      formatProbeFailureThread(probe),
+      `red ${probe.signature}`
+    );
   }
 
   return summary;
@@ -455,20 +395,15 @@ export async function runDigest(
 export function formatDigestTopLevel(summary: DigestSummary): string {
   const red = summary.severityCounts.RED;
   const total = summary.probesRun;
-  // Guard 2 (watchdog): zero-run digest must NOT render green. A green header
+  // Watchdog guard: a zero-run digest must NOT render green. A green header
   // with "Probes run: 0" is indistinguishable from a misconfigured scheduler
-  // and caused confusion on 2026-05-11 (see RCA). Use the rotating-light for
-  // any of: RED probes present, or no run artifacts found at all.
+  // and caused confusion on 2026-05-11 (see RCA).
   const emoji =
     summary.runsFound === 0 || red > 0
       ? ":rotating_light:"
       : ":large_green_circle:";
   const header = `${emoji} *Gloo AI Canary — Weekly Digest*`;
 
-  // Only show probes that need attention in the top-level post. Every
-  // probe that was fully green in the window gets rolled up into the
-  // "fully green" line below — their per-bullet detail lives in the
-  // threaded reply so the top-level stays scannable.
   const notableProbes = summary.perProbe.filter(
     (p) => p.worstSeverity !== "GREEN"
   );
@@ -484,12 +419,8 @@ export function formatDigestTopLevel(summary: DigestSummary): string {
   let notableBlock: string;
   if (notableProbes.length === 0) {
     if (summary.runsFound === 0) {
-      // No run artifacts in the 24h window at all. This usually means the
-      // probe job hasn't fired yet today (e.g. a race where the digest
-      // started before the probe wrote its GCS artifact) or the probe
-      // scheduler is misconfigured. Distinguish this clearly from the
-      // "probes ran and all were green" case so an on-caller can tell the
-      // difference at a glance.
+      // Distinguish "the probe job never fired" from "probes ran and all
+      // were green" - an on-caller has to tell them apart at a glance.
       notableBlock =
         "_(no probe runs found in the last 24h — check that the probe scheduler is running)_";
     } else {
@@ -510,10 +441,9 @@ export function formatDigestTopLevel(summary: DigestSummary): string {
   const archival = summary.archival;
   const archivalLine = `• Archive: ${archival.objectCount} objects, ${humanBytes(archival.totalBytes)}, oldest ${archival.oldestAgeDays ?? "?"}d (auto-pruned @ 90d)`;
 
-  // Registry-change block appears BEFORE "Needs attention" when present —
-  // adds/removes are a higher-signal event than routine probe failures.
-  // When the registry is steady-state we omit the block entirely rather
-  // than render "no changes" noise.
+  // Registry changes rank above routine probe failures, so the block goes
+  // before "Needs attention". Steady state omits the block entirely rather
+  // than rendering "no changes" noise.
   const registryBlock = summary.latestRegistryDelta
     ? formatRegistryDeltaBlock(summary.latestRegistryDelta) + "\n\n"
     : "";
@@ -532,15 +462,9 @@ export function formatDigestTopLevel(summary: DigestSummary): string {
 }
 
 /**
- * Renders the "/platform/v2/models registry changed" block in the
- * top-level digest post. Two modes:
- *
- *   1. First snapshot ever — subdued "baseline captured" note so the
- *      first ever deploy doesn't scream "something changed!" when in
- *      fact nothing has; it's the first measurement.
- *   2. Subsequent runs with adds/removes — rotating-light emphasized
- *      block listing every added and every removed id, plus the two
- *      snapshot timestamps so a reader can see the change window.
+ * The "/platform/v2/models registry changed" block. The first snapshot ever
+ * gets a subdued "baseline captured" note so a fresh deploy doesn't scream
+ * "something changed!" when it is really just the first measurement.
  */
 export function formatRegistryDeltaBlock(delta: ModelRegistryDelta): string {
   if (delta.isFirstSnapshot) {
@@ -551,13 +475,7 @@ export function formatRegistryDeltaBlock(delta: ModelRegistryDelta): string {
     ].join("\n");
   }
 
-  // YELLOW-flavored emoji: registry adds/removes are "something shifted,
-  // not broken" — not a RED alert. RED is reserved for probes targeting
-  // currently-supported models that actually fail.
-  //
-  // One bullet per add/remove — icon + model-id on a single line — so
-  // the block stays tight. Adds listed first (present-and-new is usually
-  // what readers scan for), then removes.
+  // YELLOW-flavored: adds/removes are "something shifted", not an outage.
   const lines: string[] = [
     `:large_yellow_circle: *\`/platform/v2/models\` changed since last snapshot*`,
   ];
@@ -574,10 +492,9 @@ export function formatRegistryDeltaBlock(delta: ModelRegistryDelta): string {
 }
 
 /**
- * Thread reply summarizing every fully-green probe in the window. One
- * consolidated post instead of N individualized ones — green probes are
- * uninteresting individually; the value is in seeing which probes are
- * collectively healthy.
+ * One consolidated post rather than N individual ones - green probes are
+ * uninteresting alone; the value is seeing which probes are collectively
+ * healthy.
  */
 export function formatAllGreenThread(greenProbes: PerProbeEntry[]): string {
   if (greenProbes.length === 0) {
@@ -595,23 +512,31 @@ export function formatAllGreenThread(greenProbes: PerProbeEntry[]): string {
   ].join("\n");
 }
 
+type SampleBreakdown = {
+  verdictMix: string;
+  statusMix: string;
+  mostRecent: PerProbeOutcomeSample | undefined;
+};
+
+function breakdownOf(samples: PerProbeOutcomeSample[]): SampleBreakdown {
+  return {
+    verdictMix: countMix(samples.map((s) => s.verdict)),
+    statusMix: countMix(
+      samples.map((s) =>
+        s.httpStatus === null ? "network error" : String(s.httpStatus)
+      )
+    ),
+    mostRecent: samples[samples.length - 1],
+  };
+}
+
 /**
- * Thread-reply text for one failing probe. Expands what "N/M pass"
- * means in the top-level digest: how many runs the probe had in the
- * 24h window, the verdict and HTTP-status mix across the failing
- * runs, and when the most recent failure happened. Response bodies
- * are intentionally omitted — those live in the per-failure
- * `Canary RED` top-level alerts, and duplicating them here would
- * just bloat the thread.
+ * Thread-reply text for one failing probe. Expands what "N/M pass" means in
+ * the top-level digest. Response bodies are omitted on purpose - they live
+ * in the per-failure `Canary RED` alerts.
  */
 export function formatProbeFailureThread(probe: PerProbeEntry): string {
-  const verdictMix = countMix(probe.failures.map((f) => f.verdict));
-  const statusMix = countMix(
-    probe.failures.map((f) =>
-      f.httpStatus === null ? "network error" : String(f.httpStatus)
-    )
-  );
-  const mostRecent = probe.failures[probe.failures.length - 1];
+  const { verdictMix, statusMix, mostRecent } = breakdownOf(probe.failures);
   const mostRecentLine = mostRecent
     ? `• Most recent failure: ${new Date(mostRecent.completedAt * 1000).toISOString()} (${mostRecent.durationMs}ms)`
     : "• Most recent failure: _none recorded_";
@@ -629,19 +554,13 @@ export function formatProbeFailureThread(probe: PerProbeEntry): string {
 }
 
 /**
- * Thread-reply text for one YELLOW probe — same shape as the RED
- * breakdown but worded to match the "soft signal / needs a look"
- * semantics of YELLOW (latency anomalies, routing shifts, etc.) rather
- * than an outright failure.
+ * Same shape as the RED breakdown, worded for the "soft signal / needs a
+ * look" semantics of YELLOW (latency anomalies, routing shifts).
  */
 export function formatProbeYellowThread(probe: PerProbeEntry): string {
-  const verdictMix = countMix(probe.yellowOutcomes.map((o) => o.verdict));
-  const statusMix = countMix(
-    probe.yellowOutcomes.map((o) =>
-      o.httpStatus === null ? "network error" : String(o.httpStatus)
-    )
+  const { verdictMix, statusMix, mostRecent } = breakdownOf(
+    probe.yellowOutcomes
   );
-  const mostRecent = probe.yellowOutcomes[probe.yellowOutcomes.length - 1];
   const mostRecentLine = mostRecent
     ? `• Most recent YELLOW: ${new Date(mostRecent.completedAt * 1000).toISOString()} (${mostRecent.durationMs}ms)`
     : "• Most recent YELLOW: _none recorded_";
@@ -658,7 +577,7 @@ export function formatProbeYellowThread(probe: PerProbeEntry): string {
   ].join("\n");
 }
 
-/** Small utility: "FAIL × 3, SCHEMA_MISMATCH × 1". */
+/** "FAIL × 3, SCHEMA_MISMATCH × 1", most frequent first. */
 export function countMix(values: string[]): string {
   const counts = new Map<string, number>();
   for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);

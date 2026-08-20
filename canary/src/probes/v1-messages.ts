@@ -5,6 +5,8 @@ import type { Probe, ProbeContext, ProbeOutcome } from "./types.js";
 
 const V1_URL = "https://platform.ai.gloo.com/ai/v1/chat/completions";
 
+const DEFAULT_TIMEOUT_MS = 30_000;
+
 export type V1MessagesFixture = {
   signature: string;
   label: string;
@@ -22,9 +24,8 @@ export function buildV1Probe(fixture: V1MessagesFixture): Probe {
     label: fixture.label,
     async run(ctx: ProbeContext): Promise<ProbeOutcome> {
       const started = Date.now();
-      const { controller, clearTimer } = withTimeout(
-        fixture.timeoutMs ?? 30_000
-      );
+      const timeoutMs = fixture.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+      const { controller, clearTimer } = withTimeout(timeoutMs);
 
       try {
         const response = await fetch(V1_URL, {
@@ -54,7 +55,6 @@ export function buildV1Probe(fixture: V1MessagesFixture): Probe {
         // classification rules. Non-abort exceptions — DNS, TCP reset,
         // TLS — stay RED.
         const isAbort = (error as Error).name === "AbortError";
-        const timeoutMs = fixture.timeoutMs ?? 30_000;
         return {
           signature: fixture.signature,
           label: fixture.label,

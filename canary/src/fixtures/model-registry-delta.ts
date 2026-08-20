@@ -47,14 +47,10 @@ export function computeRegistryDelta(
   const previousSet = new Set(input.previous.modelIds);
   const currentSet = new Set(input.current.modelIds);
 
-  const added: string[] = [];
-  for (const id of currentSorted) {
-    if (!previousSet.has(id)) added.push(id);
-  }
-  const removed: string[] = [];
-  for (const id of [...input.previous.modelIds].sort()) {
-    if (!currentSet.has(id)) removed.push(id);
-  }
+  const added = currentSorted.filter((id) => !previousSet.has(id));
+  const removed = [...input.previous.modelIds]
+    .sort()
+    .filter((id) => !currentSet.has(id));
 
   return {
     previousCapturedAt: input.previous.capturedAt,

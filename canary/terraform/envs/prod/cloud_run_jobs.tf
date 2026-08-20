@@ -55,7 +55,7 @@ resource "google_cloud_run_v2_job" "canary_probe" {
         }
 
         # Better Stack heartbeat for the Inference status-page component.
-        # Gated — see var.heartbeats_enabled for why.
+        # Gated - see var.heartbeats_enabled for why.
         dynamic "env" {
           for_each = var.heartbeats_enabled ? [true] : []
           content {
@@ -117,7 +117,7 @@ resource "google_cloud_run_v2_job" "canary_ingestion" {
       service_account = google_service_account.canary_runner.email
       # The probe polls the pipeline for up to CANARY_INGESTION_SLA_MS
       # (default 10 min) before declaring SLA_EXCEEDED, plus submit
-      # retries + verification + cleanup — give the job comfortable
+      # retries + verification + cleanup - give the job comfortable
       # headroom over the SLA budget.
       timeout     = "900s"
       max_retries = 1
@@ -134,13 +134,13 @@ resource "google_cloud_run_v2_job" "canary_ingestion" {
           # Dedicated canary publisher (owned by the canary client's
           # org, which must hold the `ingestion_access` entitlement).
           # Until this is provisioned and set, the job fails fast at
-          # config load — see variables.tf.
+          # config load - see variables.tf.
           name  = "CANARY_INGESTION_PUBLISHER_ID"
           value = var.ingestion_publisher_id
         }
 
         # Better Stack heartbeat for the Data Engine / Ingestion
-        # status-page component. Gated — see var.heartbeats_enabled.
+        # status-page component. Gated - see var.heartbeats_enabled.
         dynamic "env" {
           for_each = var.heartbeats_enabled ? [true] : []
           content {

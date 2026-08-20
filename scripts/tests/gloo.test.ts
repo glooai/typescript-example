@@ -1,29 +1,8 @@
-import { expect, it, vi, beforeEach, afterEach } from "vitest";
+import { expect, it, vi } from "vitest";
 import * as gloo from "../src/index.js";
+import { mockFetch, restoreEnvAndMocks, type FetchCall } from "./helpers.js";
 
-type FetchCall = {
-  url?: string | URL | Request;
-  init?: RequestInit;
-};
-
-const originalEnv = { ...process.env };
-
-const mockFetch = (payload: unknown): Promise<Response> =>
-  Promise.resolve(
-    new Response(JSON.stringify(payload), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    })
-  );
-
-beforeEach(() => {
-  process.env = { ...originalEnv };
-});
-
-afterEach(() => {
-  process.env = { ...originalEnv };
-  vi.restoreAllMocks();
-});
+restoreEnvAndMocks();
 
 it("loads the API key from the environment", () => {
   process.env.GLOO_AI_API_KEY = "test-key";

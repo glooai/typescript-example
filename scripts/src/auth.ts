@@ -47,6 +47,10 @@ export function loadApiKey(): string {
   return requireEnv("GLOO_AI_API_KEY");
 }
 
+export function loadPublisherId(): string {
+  return requireEnv("GLOO_PUBLISHER_ID");
+}
+
 export function authHeader(apiKey: string): { Authorization: string } {
   return { Authorization: `Bearer ${apiKey}` };
 }

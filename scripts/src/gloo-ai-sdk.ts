@@ -5,12 +5,9 @@
  * so the integration tests can exercise the AI SDK code path without
  * cross-importing from the Next.js app.
  *
- * - Uses `@ai-sdk/openai-compatible` (Gloo Completions V2 is OpenAI-shaped).
- * - Sends the WorkOS API key directly as the request's Bearer credential;
- *   there is no token exchange step.
- * - Strips the AI SDK's auto-injected `model` field when callers route via
- *   `auto_routing` or `model_family`. The Gloo V2 contract requires exactly
- *   one routing mechanism.
+ * Gloo Completions V2 is OpenAI-shaped, so `@ai-sdk/openai-compatible` fits
+ * with one adjustment: the WorkOS API key is sent directly as the Bearer
+ * credential (there is no token exchange step).
  */
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { loadApiKey } from "./auth.js";
@@ -45,11 +42,10 @@ export type GlooProviderOptions = {
 };
 
 /**
- * Build an AI-SDK-compatible Gloo provider. The returned provider exposes a
- * chat-model factory: `gloo("model-id")` or `gloo("auto-routing")`. When
- * routing via `auto_routing` or `model_family`, pass an arbitrary placeholder
- * id; `normaliseRoutingBody` strips it before the request leaves the
- * process.
+ * The returned provider exposes a chat-model factory: `gloo("model-id")`.
+ * When routing via `auto_routing` or `model_family`, pass an arbitrary
+ * placeholder id; `normaliseRoutingBody` strips it before the request leaves
+ * the process.
  */
 export function createGlooProvider(options: GlooProviderOptions = {}) {
   const apiKey = options.apiKey ?? loadApiKey();

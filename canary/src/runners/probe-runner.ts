@@ -181,23 +181,19 @@ async function maybeSnapshotRegistry(
 
 /**
  * Recovery debounce window. A signature that just passed goes into
- * "provisional recovery" — silent, no Slack post yet. Only after it's
- * continuously passed for this long do we publish the ✅ recovery
- * reply + banner + reaction and delete the state entry. If the probe
- * fails again inside the window it snaps back to "open" silently.
+ * provisional recovery: silent, no Slack post. Only after it has passed
+ * continuously for this long do we publish the recovery reply, banner, and
+ * reaction and delete the state entry; a re-failure inside the window snaps
+ * it back to "open" silently.
  *
- * The purpose is aggressive notification coalescing: the user only
- * wants to hear about a probe twice in a day — once on the initial
- * outage and once in the daily digest if it's still open at that
- * time — regardless of how many rounds it fails or how much it flaps
- * in between. The debounce turns the normal Slack-per-run chatter
- * into two posts: incident-opened, incident-confirmed-closed.
+ * This is aggressive notification coalescing. However much a probe flaps,
+ * the channel sees exactly two posts: incident-opened and
+ * incident-confirmed-closed (plus the digest while it stays open).
  *
- * 60 min was chosen to match the platform's periodic Full sweep
- * interval — a probe that passes for 4 consecutive Light ticks during
- * business hours (or 1 nighttime tick) is safely considered healed.
- * Kept as a module constant (not a config) because tuning this is a
- * code change, not a deployment toggle.
+ * 60 min matches the periodic Full sweep interval, so a probe that passes
+ * four consecutive daytime Light ticks (or one nighttime tick) is
+ * considered healed. A module constant, not config: tuning it is a code
+ * change, not a deployment toggle.
  */
 const RECOVERY_DEBOUNCE_MS = 60 * 60 * 1000;
 
@@ -233,19 +229,14 @@ export async function reconcileFailures(
     if (o.severity === "RED") failuresBySignature.set(o.signature, o);
   }
 
-  // 1. Handle current failures.
-  //
-  //    Slack failures (only on the top-level post for a brand-new
-  //    incident) are non-fatal per-signature so one bad post
-  //    (rate-limited, transient network blip, missing scope) doesn't
-  //    abort the whole loop and leave the state file unwritten —
-  //    which would cause every already-alerted failure to re-post as
-  //    new on the next run.
+  // Slack failures are non-fatal per-signature: one bad post (rate limit,
+  // network blip, missing scope) must not abort the loop and leave the
+  // state file unwritten, which would re-post every already-alerted failure
+  // as new on the next run.
   for (const [signature, outcome] of failuresBySignature) {
     const prior = next[signature];
     if (!prior) {
-      // Brand-new incident. This is the single "incident opened"
-      // notification for the signature.
+      // The single "incident opened" notification for this signature.
       const topLevelText = formatFailureTopLevel(outcome, config);
       try {
         const posted = await deps.slack.post({ text: topLevelText });
@@ -264,10 +255,9 @@ export async function reconcileFailures(
         );
       }
     } else if (prior.recoveredAt) {
-      // Silent reopen — the signature was in its debounce window and
-      // failed again. The banner was never flipped to green (we only
-      // do that on *confirmed* recovery), so there's nothing to
-      // revert on the top-level post. Just snap back to "open".
+      // Silent reopen: failed again inside the debounce window. The banner
+      // was never flipped to green (that only happens on confirmed
+      // recovery), so there is nothing to revert on the top-level post.
       next[signature] = {
         ...prior,
         lastSeenAt: now.toISOString(),
@@ -276,9 +266,8 @@ export async function reconcileFailures(
         recoveredAt: undefined,
       };
     } else {
-      // Recurring failure on an open incident — silent state update.
-      // The user learns about it exactly once per day, via the
-      // digest, as long as it stays open.
+      // Recurring failure on an open incident: silent state update. The
+      // digest is where it resurfaces while it stays open.
       next[signature] = {
         ...prior,
         lastSeenAt: now.toISOString(),
@@ -288,19 +277,13 @@ export async function reconcileFailures(
     }
   }
 
-  // 2. Handle signatures that are NOT failing this run.
-  //    - No prior entry: nothing to do.
-  //    - Prior entry, not yet recovered: start the debounce (silent).
-  //    - Prior entry, recovering, still inside debounce: silent no-op.
-  //    - Prior entry, recovering, past debounce: post confirmed
-  //      recovery + banner + reaction, delete state.
   for (const signature of Object.keys(existing)) {
     if (failuresBySignature.has(signature)) continue;
     const prior = next[signature];
     if (!prior) continue;
 
     if (!prior.recoveredAt) {
-      // First pass after failure — start the debounce. Silent.
+      // First pass after a failure: start the debounce, silently.
       next[signature] = {
         ...prior,
         recoveredAt: now.toISOString(),
@@ -311,10 +294,9 @@ export async function reconcileFailures(
 
     const elapsed = now.getTime() - Date.parse(prior.recoveredAt);
     if (Number.isFinite(elapsed) && elapsed >= RECOVERY_DEBOUNCE_MS) {
-      // Debounce expired — publish the confirmed-recovery notification
-      // and retire the state entry. Slack failures here are non-fatal:
-      // if any call throws we leave the tombstone in place and retry
-      // on the next reconcile.
+      // Debounce expired: publish the confirmed-recovery notification and
+      // retire the state entry. If any Slack call throws we leave the
+      // tombstone in place and retry on the next reconcile.
       try {
         await deps.slack.post({
           text: formatConfirmedRecovery(signature, prior.recoveredAt, now),
@@ -345,8 +327,6 @@ export async function reconcileFailures(
         );
       }
     }
-    // else: still inside the debounce — silent, no-op, wait for the
-    // next reconcile to re-evaluate.
   }
 
   await deps.gcs.writeJson(statePath, next);
@@ -396,16 +376,10 @@ export function formatFailureTopLevel(
 }
 
 /**
- * Rewrite a top-level failure post's text to carry a "Recovered"
- * banner prefix while preserving all the original diagnostic
- * detail below. Slack's `chat.update` replaces the full text, so
- * we explicitly keep the old body intact — just with a green-check
- * banner prepended — so a future triage reader can still see what
- * the original failure was.
- *
- * Banner format is chosen to keep the channel-sidebar preview
- * obviously green. Slack renders `:white_check_mark:` as the
- * white-check-on-green-box emoji.
+ * Slack's `chat.update` replaces the full text, so the original body is
+ * kept verbatim below the banner - a triage reader still needs to see what
+ * the failure was. `:white_check_mark:` renders as the green box, which
+ * keeps the channel-sidebar preview obviously green.
  */
 export function formatRecoveredTopLevel(
   originalText: string,

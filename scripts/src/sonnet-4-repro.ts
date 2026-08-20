@@ -34,7 +34,7 @@ export const FAILING_V1_MODEL = "us.anthropic.claude-sonnet-4-20250514-v1:0";
 /** Supported V2 alias for the Sonnet 4.5 family. */
 export const RECOMMENDED_V2_SONNET_MODEL = "gloo-anthropic-claude-sonnet-4.5";
 
-/** Supported V2 alias for the Haiku 4.5 family — a faster, cheaper drop-in. */
+/** Supported V2 alias for the Haiku 4.5 family - a faster, cheaper drop-in. */
 export const RECOMMENDED_V2_HAIKU_MODEL = "gloo-anthropic-claude-haiku-4.5";
 
 export const REPRO_PROMPT =

@@ -1,4 +1,4 @@
-import { expect, it, vi, beforeEach, afterEach } from "vitest";
+import { expect, it, vi, afterEach } from "vitest";
 import {
   formatConfirmedRecovery,
   formatFailureTopLevel,
@@ -36,6 +36,15 @@ function makeOutcome(partial: Partial<ProbeOutcome>): ProbeOutcome {
     details: {},
     completedAt: Math.floor(NOW.getTime() / 1000),
     ...partial,
+  };
+}
+
+function makeArtifact(outcomes: ProbeOutcome[]): RunArtifact {
+  return {
+    runId: "run-abc",
+    startedAt: NOW.toISOString(),
+    completedAt: NOW.toISOString(),
+    outcomes,
   };
 }
 
@@ -90,10 +99,6 @@ function fakeSlack(): SlackClient & {
   };
 }
 
-beforeEach(() => {
-  vi.restoreAllMocks();
-});
-
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -103,19 +108,14 @@ afterEach(() => {
 it("posts a single top-level alert when a new RED signature appears", async () => {
   const gcs = fakeGcs({});
   const slack = fakeSlack();
-  const artifact: RunArtifact = {
-    runId: "run-abc",
-    startedAt: NOW.toISOString(),
-    completedAt: NOW.toISOString(),
-    outcomes: [
-      makeOutcome({
-        signature: "v1/sonnet-4",
-        verdict: "FAIL",
-        severity: "RED",
-        httpStatus: 500,
-      }),
-    ],
-  };
+  const artifact = makeArtifact([
+    makeOutcome({
+      signature: "v1/sonnet-4",
+      verdict: "FAIL",
+      severity: "RED",
+      httpStatus: 500,
+    }),
+  ]);
 
   await reconcileFailures(artifact, { probes: [], gcs, slack }, CONFIG, NOW);
 
@@ -147,19 +147,14 @@ it("stays silent on a recurring failure — state updates only, no Slack post", 
     },
   });
   const slack = fakeSlack();
-  const artifact: RunArtifact = {
-    runId: "run-abc",
-    startedAt: NOW.toISOString(),
-    completedAt: NOW.toISOString(),
-    outcomes: [
-      makeOutcome({
-        signature: "v1/sonnet-4",
-        verdict: "FAIL",
-        severity: "RED",
-        httpStatus: 500,
-      }),
-    ],
-  };
+  const artifact = makeArtifact([
+    makeOutcome({
+      signature: "v1/sonnet-4",
+      verdict: "FAIL",
+      severity: "RED",
+      httpStatus: 500,
+    }),
+  ]);
 
   await reconcileFailures(artifact, { probes: [], gcs, slack }, CONFIG, NOW);
 
@@ -189,18 +184,13 @@ it("first pass after a failure is silent — starts the debounce window", async 
     },
   });
   const slack = fakeSlack();
-  const artifact: RunArtifact = {
-    runId: "run-abc",
-    startedAt: NOW.toISOString(),
-    completedAt: NOW.toISOString(),
-    outcomes: [
-      makeOutcome({
-        signature: "v1/sonnet-4",
-        verdict: "PASS",
-        severity: "GREEN",
-      }),
-    ],
-  };
+  const artifact = makeArtifact([
+    makeOutcome({
+      signature: "v1/sonnet-4",
+      verdict: "PASS",
+      severity: "GREEN",
+    }),
+  ]);
 
   await reconcileFailures(artifact, { probes: [], gcs, slack }, CONFIG, NOW);
 
@@ -231,18 +221,13 @@ it("publishes the confirmed-recovery post + banner + reaction once the debounce 
     },
   });
   const slack = fakeSlack();
-  const artifact: RunArtifact = {
-    runId: "run-abc",
-    startedAt: NOW.toISOString(),
-    completedAt: NOW.toISOString(),
-    outcomes: [
-      makeOutcome({
-        signature: "v1/sonnet-4",
-        verdict: "PASS",
-        severity: "GREEN",
-      }),
-    ],
-  };
+  const artifact = makeArtifact([
+    makeOutcome({
+      signature: "v1/sonnet-4",
+      verdict: "PASS",
+      severity: "GREEN",
+    }),
+  ]);
 
   await reconcileFailures(artifact, { probes: [], gcs, slack }, CONFIG, NOW);
 
@@ -283,18 +268,13 @@ it("stays silent while still inside the debounce window", async () => {
     },
   });
   const slack = fakeSlack();
-  const artifact: RunArtifact = {
-    runId: "run-abc",
-    startedAt: NOW.toISOString(),
-    completedAt: NOW.toISOString(),
-    outcomes: [
-      makeOutcome({
-        signature: "v1/sonnet-4",
-        verdict: "PASS",
-        severity: "GREEN",
-      }),
-    ],
-  };
+  const artifact = makeArtifact([
+    makeOutcome({
+      signature: "v1/sonnet-4",
+      verdict: "PASS",
+      severity: "GREEN",
+    }),
+  ]);
 
   await reconcileFailures(artifact, { probes: [], gcs, slack }, CONFIG, NOW);
 
@@ -329,19 +309,14 @@ it("silently reopens a debouncing signature on a re-failure — no Slack spam", 
     },
   });
   const slack = fakeSlack();
-  const artifact: RunArtifact = {
-    runId: "run-abc",
-    startedAt: NOW.toISOString(),
-    completedAt: NOW.toISOString(),
-    outcomes: [
-      makeOutcome({
-        signature: "v2/family/open-source",
-        verdict: "FAIL",
-        severity: "RED",
-        httpStatus: 503,
-      }),
-    ],
-  };
+  const artifact = makeArtifact([
+    makeOutcome({
+      signature: "v2/family/open-source",
+      verdict: "FAIL",
+      severity: "RED",
+      httpStatus: 503,
+    }),
+  ]);
 
   await reconcileFailures(artifact, { probes: [], gcs, slack }, CONFIG, NOW);
 
@@ -364,19 +339,14 @@ it("treats a fresh failure as a new incident after the state entry has been reti
     activeFailures: {}, // state was retired on a prior confirmed recovery
   });
   const slack = fakeSlack();
-  const artifact: RunArtifact = {
-    runId: "run-abc",
-    startedAt: NOW.toISOString(),
-    completedAt: NOW.toISOString(),
-    outcomes: [
-      makeOutcome({
-        signature: "v2/family/open-source",
-        verdict: "FAIL",
-        severity: "RED",
-        httpStatus: 503,
-      }),
-    ],
-  };
+  const artifact = makeArtifact([
+    makeOutcome({
+      signature: "v2/family/open-source",
+      verdict: "FAIL",
+      severity: "RED",
+      httpStatus: 503,
+    }),
+  ]);
 
   await reconcileFailures(artifact, { probes: [], gcs, slack }, CONFIG, NOW);
 
@@ -408,18 +378,13 @@ it("confirmed recovery survives when the legacy state entry has no topLevelText"
     },
   });
   const slack = fakeSlack();
-  const artifact: RunArtifact = {
-    runId: "run-abc",
-    startedAt: NOW.toISOString(),
-    completedAt: NOW.toISOString(),
-    outcomes: [
-      makeOutcome({
-        signature: "v1/legacy",
-        verdict: "PASS",
-        severity: "GREEN",
-      }),
-    ],
-  };
+  const artifact = makeArtifact([
+    makeOutcome({
+      signature: "v1/legacy",
+      verdict: "PASS",
+      severity: "GREEN",
+    }),
+  ]);
 
   await reconcileFailures(artifact, { probes: [], gcs, slack }, CONFIG, NOW);
 
@@ -458,18 +423,13 @@ it("a failed chat.update does not block the confirmed-recovery cleanup", async (
       throw new Error("missing_scope");
     },
   };
-  const artifact: RunArtifact = {
-    runId: "run-abc",
-    startedAt: NOW.toISOString(),
-    completedAt: NOW.toISOString(),
-    outcomes: [
-      makeOutcome({
-        signature: "v1/update-blocked",
-        verdict: "PASS",
-        severity: "GREEN",
-      }),
-    ],
-  };
+  const artifact = makeArtifact([
+    makeOutcome({
+      signature: "v1/update-blocked",
+      verdict: "PASS",
+      severity: "GREEN",
+    }),
+  ]);
 
   await reconcileFailures(artifact, { probes: [], gcs, slack }, CONFIG, NOW);
 
@@ -498,15 +458,10 @@ it("keeps reconciling + persisting state when a top-level post throws", async ()
     async react() {},
     async update() {},
   };
-  const artifact: RunArtifact = {
-    runId: "run-abc",
-    startedAt: NOW.toISOString(),
-    completedAt: NOW.toISOString(),
-    outcomes: [
-      makeOutcome({ signature: "v1/flaky", verdict: "FAIL", severity: "RED" }),
-      makeOutcome({ signature: "v1/ok", verdict: "FAIL", severity: "RED" }),
-    ],
-  };
+  const artifact = makeArtifact([
+    makeOutcome({ signature: "v1/flaky", verdict: "FAIL", severity: "RED" }),
+    makeOutcome({ signature: "v1/ok", verdict: "FAIL", severity: "RED" }),
+  ]);
 
   await reconcileFailures(artifact, { probes: [], gcs, slack }, CONFIG, NOW);
 

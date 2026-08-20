@@ -22,7 +22,17 @@ const MAX_VARIANTS = 4;
 const DEFAULT_PROMPT =
   "In three sentences, explain what makes a good technical explanation.";
 
-/** Index of the cheapest and fastest successful results, for the badges. */
+function lowestBy(
+  results: CompareResult[],
+  score: (result: CompareResult) => number
+): CompareResult | null {
+  return results.reduce<CompareResult | null>(
+    (best, result) => (!best || score(result) < score(best) ? result : best),
+    null
+  );
+}
+
+/** Request ids of the cheapest and fastest successful results, for the badges. */
 function findWinners(results: CompareResult[]): {
   fastest: string | null;
   cheapest: string | null;
@@ -30,20 +40,10 @@ function findWinners(results: CompareResult[]): {
   const ok = results.filter((result) => result.status === "ok");
   const priced = ok.filter((result) => result.costUsd !== null);
 
-  const fastest = ok.reduce<CompareResult | null>(
-    (best, result) =>
-      !best || result.latencyMs < best.latencyMs ? result : best,
-    null
-  );
-  const cheapest = priced.reduce<CompareResult | null>(
-    (best, result) =>
-      !best || (result.costUsd ?? 0) < (best.costUsd ?? 0) ? result : best,
-    null
-  );
-
   return {
-    fastest: fastest?.requestId ?? null,
-    cheapest: cheapest?.requestId ?? null,
+    fastest: lowestBy(ok, (result) => result.latencyMs)?.requestId ?? null,
+    cheapest:
+      lowestBy(priced, (result) => result.costUsd ?? 0)?.requestId ?? null,
   };
 }
 

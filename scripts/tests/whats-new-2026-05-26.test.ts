@@ -1,4 +1,4 @@
-import { expect, it, vi, beforeEach, afterEach } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   EXPECTED_GA_PROMOTION,
   EXPECTED_NEW_MODELS,
@@ -19,24 +19,9 @@ import {
   summarizeCacheUsage,
   type RegistryModel,
 } from "../src/whats-new-2026-05-26.js";
+import { jsonResponse, restoreEnvAndMocks } from "./helpers.js";
 
-const originalEnv = { ...process.env };
-
-beforeEach(() => {
-  process.env = { ...originalEnv };
-});
-
-afterEach(() => {
-  process.env = { ...originalEnv };
-  vi.restoreAllMocks();
-});
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
+restoreEnvAndMocks();
 
 /** A registry snapshot with a display name for every expected model. */
 function fullRegistry(): RegistryModel[] {

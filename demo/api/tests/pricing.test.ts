@@ -115,11 +115,10 @@ describe("createRegistryLoader", () => {
   }
 
   it("caches the registry for the TTL and refetches after it expires", async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse(registryPayload));
-    const load = createRegistryLoader({
-      ttlMs: 1000,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      jsonResponse(registryPayload)
+    );
+    const load = createRegistryLoader({ ttlMs: 1000, fetchImpl });
 
     await load(0);
     await load(500);
@@ -131,17 +130,14 @@ describe("createRegistryLoader", () => {
 
   it("falls back to the last good index when the registry is unreachable", async () => {
     let calls = 0;
-    const fetchImpl = vi.fn(async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
       calls += 1;
       if (calls === 1) {
         return jsonResponse(registryPayload);
       }
       throw new Error("network down");
     });
-    const load = createRegistryLoader({
-      ttlMs: 1,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
+    const load = createRegistryLoader({ ttlMs: 1, fetchImpl });
 
     const first = await load(0);
     expect(first.size).toBe(2);
@@ -151,12 +147,10 @@ describe("createRegistryLoader", () => {
   });
 
   it("yields an empty index when the first fetch fails", async () => {
-    const fetchImpl = vi.fn(async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
       throw new Error("network down");
     });
-    const load = createRegistryLoader({
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
+    const load = createRegistryLoader({ fetchImpl });
 
     expect((await load(0)).size).toBe(0);
   });

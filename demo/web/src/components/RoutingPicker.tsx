@@ -15,6 +15,10 @@ const TRADITIONS = [
   { value: "mainline", label: "Mainline" },
 ];
 
+/** Fallbacks for the mode the visitor just switched into, before they pick. */
+const DEFAULT_FAMILY = "anthropic";
+const DEFAULT_MODEL = "gloo-openai-gpt-5-mini";
+
 const MODE_LABELS: Record<RoutingSelection["mode"], string> = {
   auto_routing: "AI Core (auto)",
   model_family: "AI Core Select (family)",
@@ -49,11 +53,11 @@ export function RoutingPicker({
             mode: mode as RoutingSelection["mode"],
             modelFamily:
               mode === "model_family"
-                ? (value.modelFamily ?? "anthropic")
+                ? (value.modelFamily ?? DEFAULT_FAMILY)
                 : undefined,
             model:
               mode === "model"
-                ? (value.model ?? models[0]?.id ?? "gloo-openai-gpt-5-mini")
+                ? (value.model ?? models[0]?.id ?? DEFAULT_MODEL)
                 : undefined,
           })
         }
@@ -70,7 +74,7 @@ export function RoutingPicker({
       {value.mode === "model_family" && (
         <Select
           label="Family"
-          value={value.modelFamily ?? "anthropic"}
+          value={value.modelFamily ?? DEFAULT_FAMILY}
           onChange={(modelFamily) => onChange({ ...value, modelFamily })}
         >
           {FAMILIES.map((family) => (

@@ -1,9 +1,9 @@
-import { expect, it, vi, beforeEach, afterEach, describe } from "vitest";
+import { expect, it, vi, beforeEach, describe } from "vitest";
 import { EventEmitter } from "node:events";
 import * as itemsMetadataModule from "../src/items-metadata.js";
 import type { ItemMetadata } from "../src/items-metadata.js";
+import { mockFetch, restoreEnvAndMocks, type FetchCall } from "./helpers.js";
 
-// Mock stream class
 class MockWriteStream extends EventEmitter {
   write = vi.fn(() => true);
   end = vi.fn((callback?: () => void) => {
@@ -31,29 +31,10 @@ vi.mock("../src/items.js", () => ({
   loadPublisherId: vi.fn(() => "publisher-123"),
 }));
 
-type FetchCall = {
-  url?: string | URL | Request;
-  init?: RequestInit;
-};
-
-const originalEnv = { ...process.env };
-
-const mockFetch = (payload: unknown, status = 200): Promise<Response> =>
-  Promise.resolve(
-    new Response(JSON.stringify(payload), {
-      status,
-      headers: { "Content-Type": "application/json" },
-    })
-  );
+restoreEnvAndMocks();
 
 beforeEach(() => {
-  process.env = { ...originalEnv };
   mockStream = new MockWriteStream();
-});
-
-afterEach(() => {
-  process.env = { ...originalEnv };
-  vi.restoreAllMocks();
 });
 
 const sampleMetadata: ItemMetadata = {

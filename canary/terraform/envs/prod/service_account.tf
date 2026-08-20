@@ -12,4 +12,4 @@ resource "google_project_iam_member" "canary_log_writer" {
 }
 
 # Required for Cloud Run Job execution to read its own runtime identity.
-# `roles/run.invoker` goes on Cloud Scheduler's SA, not this one — see scheduler.tf.
+# `roles/run.invoker` goes on Cloud Scheduler's SA, not this one - see scheduler.tf.

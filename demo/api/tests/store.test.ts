@@ -256,8 +256,8 @@ describe("listSessions", () => {
     ]);
   });
 
-  it("hides archived conversations from the default list", async () => {
-    const rows = [
+  function oneLiveOneArchived(): StoredItem[] {
+    return [
       {
         session_id: "s-live",
         last_message_at: "2026-08-11T10:00:00.000Z",
@@ -270,37 +270,26 @@ describe("listSessions", () => {
         archived: true,
       },
     ];
+  }
 
+  it("hides archived conversations from the default list", async () => {
     expect(
       (
-        await createStore(TABLE, fakeClient(rows).client).listSessions("v-1", {
-          limit: 10,
-        })
+        await createStore(
+          TABLE,
+          fakeClient(oneLiveOneArchived()).client
+        ).listSessions("v-1", { limit: 10 })
       ).sessions.map((session) => session.id)
     ).toEqual(["s-live"]);
   });
 
   it("shows only the archived ones when they are asked for", async () => {
-    const rows = [
-      {
-        session_id: "s-live",
-        last_message_at: "2026-08-11T10:00:00.000Z",
-        preview: "live",
-      },
-      {
-        session_id: "s-archived",
-        last_message_at: "2026-08-11T11:00:00.000Z",
-        preview: "archived",
-        archived: true,
-      },
-    ];
-
     expect(
       (
-        await createStore(TABLE, fakeClient(rows).client).listSessions("v-1", {
-          limit: 10,
-          archived: true,
-        })
+        await createStore(
+          TABLE,
+          fakeClient(oneLiveOneArchived()).client
+        ).listSessions("v-1", { limit: 10, archived: true })
       ).sessions.map((session) => session.id)
     ).toEqual(["s-archived"]);
   });
@@ -329,14 +318,16 @@ describe("listSessions", () => {
     ).toEqual(["s-pinned", "s-newer"]);
   });
 
+  function fiveSessions(): StoredItem[] {
+    return Array.from({ length: 5 }, (_, index) => ({
+      session_id: `s-${index}`,
+      last_message_at: `2026-08-11T1${index}:00:00.000Z`,
+      preview: "",
+    }));
+  }
+
   it("caps the page and offers a cursor when more remain", async () => {
-    const { client } = fakeClient(
-      Array.from({ length: 5 }, (_, index) => ({
-        session_id: `s-${index}`,
-        last_message_at: `2026-08-11T1${index}:00:00.000Z`,
-        preview: "",
-      }))
-    );
+    const { client } = fakeClient(fiveSessions());
 
     const page = await createStore(TABLE, client).listSessions("v-1", {
       limit: 2,
@@ -347,12 +338,7 @@ describe("listSessions", () => {
   });
 
   it("resumes the next page after the cursor it was handed", async () => {
-    const rows = Array.from({ length: 5 }, (_, index) => ({
-      session_id: `s-${index}`,
-      last_message_at: `2026-08-11T1${index}:00:00.000Z`,
-      preview: "",
-    }));
-    const store = createStore(TABLE, fakeClient(rows).client);
+    const store = createStore(TABLE, fakeClient(fiveSessions()).client);
 
     const first = await store.listSessions("v-1", { limit: 2 });
     const second = await store.listSessions("v-1", {

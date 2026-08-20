@@ -18,6 +18,10 @@ import { sessionsPath, type SessionsQuery } from "./sessions";
 
 const SESSION_STORAGE_KEY = "gloo-demo-session-id";
 
+function newSessionId(): string {
+  return `s-${crypto.randomUUID().replace(/-/g, "")}`;
+}
+
 /**
  * Opaque id used only to key this browser's saved transcript in DynamoDB.
  * It grants no access to anything, so localStorage is the right home for
@@ -28,7 +32,7 @@ export function getSessionId(): string {
   if (existing) {
     return existing;
   }
-  return rememberSessionId(`s-${crypto.randomUUID().replace(/-/g, "")}`);
+  return rememberSessionId(newSessionId());
 }
 
 /** Which conversation a refresh will land back in. */
@@ -39,7 +43,7 @@ export function rememberSessionId(sessionId: string): string {
 
 /** A fresh conversation. Nothing server side is created until a first turn. */
 export function startSession(): string {
-  return rememberSessionId(`s-${crypto.randomUUID().replace(/-/g, "")}`);
+  return rememberSessionId(newSessionId());
 }
 
 async function readJson<T>(response: Response): Promise<T> {

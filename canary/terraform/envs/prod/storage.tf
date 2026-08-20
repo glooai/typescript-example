@@ -1,7 +1,7 @@
 /**
  * GCS bucket for canary result archives. Object lifecycle handles pruning:
  * anything older than `results_retention_days` is auto-deleted by GCS.
- * No explicit pruning code runs — the daily digest just *reports* state.
+ * No explicit pruning code runs - the daily digest just *reports* state.
  */
 
 resource "google_storage_bucket" "canary_results" {

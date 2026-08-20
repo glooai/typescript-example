@@ -1,25 +1,25 @@
 /**
- * "What's New — Week of May 26, 2026" release validators.
+ * "What's New - Week of May 26, 2026" release validators.
  *
  * Gloo published a platform changelog for the week of 2026-05-26 (11 new
  * models, a Gemini Flash-Lite GA promotion, prompt-cache usage metrics,
  * and clearer provider-validation errors). This script demonstrates and
  * *programmatically validates* the subset of those claims that can be
- * checked automatically from a single OAuth client — without eyeballing a
+ * checked automatically from a single OAuth client - without eyeballing a
  * Studio dashboard or reasoning about non-deterministic behavior.
  *
  * Three checks, each backed by a pure, unit-tested classifier:
  *
- *   1. New-model availability — validated against the authoritative
+ *   1. New-model availability - validated against the authoritative
  *      `/platform/v2/models` registry (the same source of truth the canary
  *      hydrates from). We assert by *display name*, not by guessing alias
  *      IDs, so the check can't drift on a naming convention we don't control.
  *
- *   2. Prompt-cache usage metrics — the changelog promises new
+ *   2. Prompt-cache usage metrics - the changelog promises new
  *      `cache_tokens` and `cache_hit_rate` fields in the usage API. We send
  *      a completion and validate those fields are present and well-formed.
  *
- *   3. Provider-validation error clarity — the changelog promises provider
+ *   3. Provider-validation error clarity - the changelog promises provider
  *      validation errors now surface as actionable 4xx client errors instead
  *      of generic 500s. We send a deliberately invalid model and classify the
  *      response shape.
@@ -30,21 +30,21 @@
  * org caps, and docs restructuring.
  *
  * Everything network-touching is gated behind the entrypoint check at the
- * bottom; the exported functions are pure (or take an injectable `fetchImpl`)
- * so the whole module is testable without hitting the platform.
+ * bottom, so importing this module never touches the platform; the
+ * classifiers are pure and unit-testable on their own.
  */
 
 import { config as loadEnv } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { loadApiKey, withTimeout } from "./auth.js";
+import { COMPLETIONS_V2_URL } from "./completions-v2.js";
 
 export const MODELS_REGISTRY_URL =
   "https://platform.ai.gloo.com/platform/v2/models";
-export const COMPLETIONS_V2_URL =
-  "https://platform.ai.gloo.com/ai/v2/chat/completions";
+export { COMPLETIONS_V2_URL };
 
 // ---------------------------------------------------------------------------
-// Capability 1 — new-model availability (validated against the live registry)
+// Capability 1 - new-model availability (validated against the live registry)
 // ---------------------------------------------------------------------------
 
 /** Subset of a `/platform/v2/models` entry we consume. */
@@ -60,8 +60,8 @@ export type RegistryModel = {
  * display name) rather than guessing the `gloo-<provider>-<model>` alias, so
  * a check stays valid even if the alias scheme differs from our guess.
  *
- * `nameIncludes` — ALL substrings must be present (AND).
- * `nameExcludes` — NONE may be present (used to assert a GA, i.e. "not preview").
+ * `nameIncludes` - ALL substrings must be present (AND).
+ * `nameExcludes` - NONE may be present (used to assert a GA, i.e. "not preview").
  */
 export type ModelExpectation = {
   label: string;
@@ -76,7 +76,7 @@ export type ModelExpectation = {
  * NOTE: the changelog groups "Qwen 3 235B A22B variants" and the two MiMo
  * models loosely; the named entries below are the ones with an unambiguous
  * display name to match on. ABSENT does not necessarily mean "not launched"
- * — it can also mean this OAuth client/tenant/region isn't entitled to it
+ * - it can also mean this OAuth client/tenant/region isn't entitled to it
  * yet (cf. the canary's NOT_ENTITLED signal). The check surfaces the gap; a
  * human confirms the cause.
  */
@@ -193,7 +193,7 @@ export async function fetchModelRegistry(
 }
 
 // ---------------------------------------------------------------------------
-// Capability 2 — prompt-cache usage metrics
+// Capability 2 - prompt-cache usage metrics
 // ---------------------------------------------------------------------------
 
 export type CacheUsageSummary = {
@@ -244,7 +244,7 @@ export function summarizeCacheUsage(usage: unknown): CacheUsageSummary {
 }
 
 // ---------------------------------------------------------------------------
-// Capability 3 — provider-validation error clarity
+// Capability 3 - provider-validation error clarity
 // ---------------------------------------------------------------------------
 
 export type ErrorClassification =
@@ -302,7 +302,7 @@ export function classifyErrorResponse(
 }
 
 // ---------------------------------------------------------------------------
-// Live runners (network) — thin wrappers over the pure classifiers above
+// Live runners (network) - thin wrappers over the pure classifiers above
 // ---------------------------------------------------------------------------
 
 export const CACHE_PROBE_MODEL = "gloo-anthropic-claude-haiku-4.5";
