@@ -6,11 +6,11 @@
 
 TypeScript examples for the [Gloo AI](https://www.ai.gloo.com/) platform API:
 
-| Package                | Description                                                          |
-| ---------------------- | -------------------------------------------------------------------- |
-| [`chatbot/`](chatbot/) | Next.js streaming chatbot using the Completions V2 API               |
-| [`demo/`](demo/)       | Hosted demo: static React SPA, proxy Lambda, DynamoDB, and Terraform |
-| [`scripts/`](scripts/) | CLI scripts for auth, chat, ingestion, search, and item management   |
+| Package                | Description                                                           |
+| ---------------------- | --------------------------------------------------------------------- |
+| [`chatbot/`](chatbot/) | Next.js streaming chatbot using the Completions V2 API                |
+| [`demo/`](demo/)       | Hosted demo: React SPA, proxy API on Fargate, DynamoDB, and Terraform |
+| [`scripts/`](scripts/) | CLI scripts for auth, chat, ingestion, search, and item management    |
 
 ## Prerequisites
 
@@ -53,29 +53,23 @@ Set **Root Directory** to `chatbot` and add the environment variable `GLOO_AI_AP
 
 ## Demo
 
-A hosted proof of concept for `glooai.servant.run`: a static React SPA (Vite,
-Tailwind v4) served from S3 behind CloudFront, talking to a Lambda Function URL
-that holds the Gloo API key and records every call to DynamoDB.
+**Live at [glooai.servant.run](https://glooai.servant.run)** (Basic Auth:
+`gloo` / `ai`, not a secret, just keeps the demo out of search indexes).
 
-Two panels. **Chat** streams a completion and reports which model actually
-handled it, the routing tier, time to first token, tokens, and the cost of that
-one call. **Compare** sends one prompt across several routing mechanisms at
-once and puts the real answers side by side with measured latency and cost. A
-third view reads the DynamoDB request ledger back so those numbers are
-averages over traffic the demo actually made.
+<p>
+  <img src="demo/docs/screenshot-dark.png" alt="Chat panel, dark mode" width="49%" />
+  <img src="demo/docs/screenshot-light.png" alt="Chat panel, light mode" width="49%" />
+</p>
+
+Chat with streaming responses, compare models side by side, and see real cost
+and speed measured from actual traffic, not list-price estimates. Details on
+the architecture, DynamoDB schema, and deploy runbook are in
+[`demo/README.md`](demo/README.md).
 
 ```bash
 pnpm demo:dev        # Vite dev server (needs DEMO_API_URL, see demo/README.md)
-pnpm demo:deploy     # Build the SPA, sync to S3, invalidate CloudFront
+pnpm demo:deploy     # Build and push the API container, sync the SPA to S3
 ```
-
-The deployed site sits behind an HTTP Basic Auth gate, username `gloo`,
-password `ai`. Those credentials are deliberately not secret: together with
-`X-Robots-Tag: noindex` and `robots.txt` they keep a public demo out of search
-indexes. They are not access control, and nothing behind them is sensitive.
-
-Infrastructure, the DynamoDB schema, and the deploy runbook are documented in
-[`demo/README.md`](demo/README.md).
 
 ## CLI Scripts
 
@@ -172,8 +166,9 @@ pnpm format:check    # Prettier — check formatting
 │   ├── components/          # Chat UI, message renderer, settings
 │   └── lib/                 # Gloo auth + provider wrappers
 ├── demo/                    # Hosted demo (glooai.servant.run)
-│   ├── api/                 # Proxy Lambda (Function URL, DynamoDB ledger)
-│   ├── terraform/           # S3 + CloudFront + Lambda + DynamoDB
+│   ├── api/                 # Proxy API (Fargate, DynamoDB ledger)
+│   ├── docs/                # README screenshots
+│   ├── terraform/           # S3 + CloudFront + ALB + Fargate + DynamoDB
 │   └── web/                 # Static React SPA (Vite)
 ├── scripts/                 # CLI scripts + tests
 │   ├── src/                 # Auth, chat, ingestion, search, items
