@@ -1,24 +1,8 @@
 import { config as loadEnv } from "dotenv";
-import jwt from "jsonwebtoken";
-import type { JwtPayload, Secret, VerifyOptions } from "jsonwebtoken";
 import { fileURLToPath } from "node:url";
-import {
-  loadCredentials,
-  getAccessToken,
-  fetchJson,
-  withTimeout,
-  type Credentials,
-  type TokenResponse,
-} from "./auth.js";
+import { loadApiKey, fetchJson, withTimeout } from "./auth.js";
 
-export {
-  loadCredentials,
-  getAccessToken,
-  fetchJson,
-  withTimeout,
-  type Credentials,
-  type TokenResponse,
-};
+export { loadApiKey, fetchJson, withTimeout };
 
 const CHAT_URL = "https://platform.ai.gloo.com/ai/v1/chat/completions";
 const MODEL = "meta.llama3-70b-instruct-v1:0";
@@ -36,36 +20,6 @@ type ChatCompletionResponse = {
   }>;
   [key: string]: unknown;
 };
-
-/**
- * Returns the exp claim from an access token.
- * When no verification key is provided the value is informational only.
- * Pass verification options (algorithms/issuer/audience, etc.) to constrain
- * which tokens will be accepted when a verification key is supplied.
- */
-export function describeExpiration(
-  accessToken: string,
-  verificationKey?: Secret,
-  verificationOptions?: VerifyOptions
-): number | null {
-  try {
-    const payload = verificationKey
-      ? (jwt.verify(
-          accessToken,
-          verificationKey,
-          verificationOptions
-        ) as JwtPayload)
-      : (jwt.decode(accessToken) as JwtPayload | null);
-
-    if (!payload || typeof payload.exp !== "number") {
-      return null;
-    }
-
-    return payload.exp;
-  } catch {
-    return null;
-  }
-}
 
 export async function getChatCompletion(
   accessToken: string,
@@ -99,21 +53,9 @@ export async function getChatCompletion(
 export async function runExample(
   prompt = "How do I discover my purpose?"
 ): Promise<void> {
-  const { clientId, clientSecret } = loadCredentials();
-  const tokenResponse = await getAccessToken({ clientId, clientSecret });
-  const accessToken = tokenResponse.access_token;
-  if (!accessToken) {
-    throw new Error("Access token missing from token response.");
-  }
+  const apiKey = loadApiKey();
 
-  const expiration = describeExpiration(accessToken);
-  console.log(
-    `Token expires at (unix seconds, not verified): ${
-      expiration ?? "unknown (missing exp)"
-    }`
-  );
-
-  const completion = await getChatCompletion(accessToken, prompt);
+  const completion = await getChatCompletion(apiKey, prompt);
   console.log(JSON.stringify(completion, null, 2));
 }
 

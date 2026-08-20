@@ -1,17 +1,3 @@
-const TOKEN_URL = "https://platform.ai.gloo.com/oauth2/token";
-
-export type Credentials = {
-  clientId: string;
-  clientSecret: string;
-};
-
-export type TokenResponse = {
-  access_token: string;
-  token_type?: string;
-  expires_in?: number;
-  scope?: string;
-};
-
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
@@ -52,35 +38,15 @@ export async function fetchJson<TResponse>(
   }
 }
 
-export function loadCredentials(): Credentials {
-  return {
-    clientId: process.env.GLOO_AI_CLIENT_ID ?? requireEnv("GLOO_CLIENT_ID"),
-    clientSecret:
-      process.env.GLOO_AI_CLIENT_SECRET ?? requireEnv("GLOO_CLIENT_SECRET"),
-  };
+/**
+ * Reads the WorkOS API key used for all Gloo AI platform calls. The key is
+ * sent directly as the request's Bearer credential; there is no token
+ * exchange step (API keys replaced the OAuth2 client_credentials flow).
+ */
+export function loadApiKey(): string {
+  return requireEnv("GLOO_AI_API_KEY");
 }
 
-export async function getAccessToken({
-  clientId,
-  clientSecret,
-}: Credentials): Promise<TokenResponse> {
-  const encodedCredentials = Buffer.from(
-    `${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`
-  ).toString("base64");
-
-  return fetchJson<TokenResponse>(
-    TOKEN_URL,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${encodedCredentials}`,
-      },
-      body: new URLSearchParams({
-        grant_type: "client_credentials",
-        scope: "api/access",
-      }),
-    },
-    10_000
-  );
+export function authHeader(apiKey: string): { Authorization: string } {
+  return { Authorization: `Bearer ${apiKey}` };
 }

@@ -2,7 +2,6 @@ import { expect, it, vi, beforeEach, afterEach, describe } from "vitest";
 import { EventEmitter } from "node:events";
 import * as itemsMetadataModule from "../src/items-metadata.js";
 import type { ItemMetadata } from "../src/items-metadata.js";
-import type { TokenResponse } from "../src/auth.js";
 
 // Mock stream class
 class MockWriteStream extends EventEmitter {
@@ -24,8 +23,7 @@ vi.mock("node:fs/promises", () => ({
 }));
 
 vi.mock("../src/auth.js", () => ({
-  loadCredentials: vi.fn(() => ({ clientId: "id", clientSecret: "secret" })),
-  getAccessToken: vi.fn(),
+  loadApiKey: vi.fn(() => "key123"),
 }));
 
 vi.mock("../src/items.js", () => ({
@@ -335,10 +333,8 @@ describe("streamMetadataToFile", () => {
 
 describe("runItemsMetadataExample", () => {
   it("runs full flow with mocked dependencies", async () => {
-    const { getAccessToken } = await import("../src/auth.js");
     const { getItems } = await import("../src/items.js");
 
-    vi.mocked(getAccessToken).mockResolvedValue({ access_token: "token123" });
     vi.mocked(getItems).mockResolvedValue([
       {
         item_id: "item-1",
@@ -362,15 +358,6 @@ describe("runItemsMetadataExample", () => {
     expect(logSpy).toHaveBeenCalledWith("Fetching metadata...");
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining("Saved 1 metadata records")
-    );
-  });
-
-  it("throws when access token is missing", async () => {
-    const { getAccessToken } = await import("../src/auth.js");
-    vi.mocked(getAccessToken).mockResolvedValue({} as TokenResponse);
-
-    await expect(itemsMetadataModule.runItemsMetadataExample()).rejects.toThrow(
-      "Access token missing from token response."
     );
   });
 });

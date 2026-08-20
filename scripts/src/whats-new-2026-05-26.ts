@@ -36,12 +36,7 @@
 
 import { config as loadEnv } from "dotenv";
 import { fileURLToPath } from "node:url";
-import {
-  loadCredentials,
-  getAccessToken,
-  withTimeout,
-  type Credentials,
-} from "./auth.js";
+import { loadApiKey, withTimeout } from "./auth.js";
 
 export const MODELS_REGISTRY_URL =
   "https://platform.ai.gloo.com/platform/v2/models";
@@ -389,19 +384,14 @@ export type WhatsNewReport = {
 };
 
 export async function runWhatsNewChecks(
-  credentials: Credentials
+  apiKey: string
 ): Promise<WhatsNewReport> {
-  const tokenResponse = await getAccessToken(credentials);
-  const accessToken = tokenResponse.access_token;
-  if (!accessToken) {
-    throw new Error("Access token missing from token response.");
-  }
   // Model registry is unauthenticated, but we fetch it inside the same run
   // so the report is a single coherent snapshot.
   const [models, cache, errorClarity] = await Promise.all([
     checkModelAvailability(),
-    checkPromptCache(accessToken),
-    checkErrorClarity(accessToken),
+    checkPromptCache(apiKey),
+    checkErrorClarity(apiKey),
   ]);
   return { models, cache, errorClarity };
 }
@@ -437,8 +427,8 @@ function formatReport(report: WhatsNewReport): string {
 }
 
 export async function main(): Promise<void> {
-  const credentials = loadCredentials();
-  const report = await runWhatsNewChecks(credentials);
+  const apiKey = loadApiKey();
+  const report = await runWhatsNewChecks(apiKey);
   console.log(formatReport(report));
 
   const absent = report.models.filter((m) => m.status === "ABSENT");

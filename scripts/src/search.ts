@@ -1,6 +1,6 @@
 import { config as loadEnv } from "dotenv";
 import { fileURLToPath } from "node:url";
-import { loadCredentials, getAccessToken } from "./auth.js";
+import { loadApiKey } from "./auth.js";
 
 const SEARCH_URL = "https://platform.ai.gloo.com/ai/data/v1/search";
 const COLLECTION = "GlooProd";
@@ -69,17 +69,11 @@ export async function runSearchExample(
   query = "leadership",
   tenant = "ExampleTenant"
 ): Promise<void> {
-  const credentials = loadCredentials();
-  const tokenResponse = await getAccessToken(credentials);
-  const accessToken = tokenResponse.access_token;
-
-  if (!accessToken) {
-    throw new Error("Access token missing from token response.");
-  }
+  const apiKey = loadApiKey();
 
   console.log(`Searching for "${query}" in tenant "${tenant}"...`);
 
-  const results = await search(accessToken, query, tenant, 5);
+  const results = await search(apiKey, query, tenant, 5);
 
   console.log(
     `Found ${results.data.length} results (intent: ${results.intent})`

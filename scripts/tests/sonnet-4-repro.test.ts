@@ -94,14 +94,7 @@ it("returns null content when the body is not JSON", () => {
 it("runs the full repro flow with mocked network calls", async () => {
   const fetchSpy = vi
     .spyOn(globalThis, "fetch")
-    .mockImplementationOnce(
-      async () =>
-        new Response(JSON.stringify({ access_token: "token123" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        })
-    )
-    // V1 returns HTTP 200 with an empty completion — one of the observed
+    // V1 returns HTTP 200 with an empty completion, one of the observed
     // failure signatures for the deprecated model ID.
     .mockImplementationOnce(
       async () =>
@@ -133,10 +126,7 @@ it("runs the full repro flow with mocked network calls", async () => {
         )
     );
 
-  const outcomes = await runAllCases({
-    clientId: "id",
-    clientSecret: "secret",
-  });
+  const outcomes = await runAllCases("key123");
 
   expect(outcomes).toHaveLength(3);
   expect(outcomes[0].verdict).toBe("EMPTY_COMPLETION");

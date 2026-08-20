@@ -2,7 +2,7 @@ import { config as loadEnv } from "dotenv";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadCredentials, getAccessToken } from "./auth.js";
+import { loadApiKey } from "./auth.js";
 
 const ITEMS_BASE_URL = "https://platform.ai.gloo.com/engine/v2/publisher";
 
@@ -63,18 +63,12 @@ async function saveItemsToFile(items: ItemsResponse): Promise<string> {
 }
 
 export async function runItemsExample(): Promise<void> {
-  const credentials = loadCredentials();
+  const apiKey = loadApiKey();
   const publisherId = loadPublisherId();
-  const tokenResponse = await getAccessToken(credentials);
-  const accessToken = tokenResponse.access_token;
-
-  if (!accessToken) {
-    throw new Error("Access token missing from token response.");
-  }
 
   console.log(`Fetching items for publisher "${publisherId}"...`);
 
-  const items = await getItems(accessToken, publisherId);
+  const items = await getItems(apiKey, publisherId);
 
   console.log(`Found ${items.length} item(s)`);
   console.log(JSON.stringify(items, null, 2));

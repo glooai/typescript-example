@@ -1,9 +1,9 @@
 import { config as loadEnv } from "dotenv";
 import jwt from "jsonwebtoken";
-import { loadCredentials, getAccessToken } from "./auth.js";
+import { loadApiKey } from "./auth.js";
 
 // Org UUID the current credentials are expected to resolve to. Set via env
-// or edit locally when you need to verify a specific tenant — the default
+// or edit locally when you need to verify a specific tenant; the default
 // here is a placeholder so this file doesn't bake a production identifier
 // into the repo.
 const EXPECTED_ORG_ID =
@@ -40,24 +40,25 @@ function formatTimeRemaining(epochSeconds: number): string {
   return `valid for ${seconds} second${seconds !== 1 ? "s" : ""}`;
 }
 
-async function runJwtCheck(): Promise<void> {
-  console.log("=== JWT Token Validation ===\n");
+function maskApiKey(apiKey: string): string {
+  if (apiKey.length <= 8) return "*".repeat(apiKey.length);
+  return `${apiKey.slice(0, 4)}${"*".repeat(apiKey.length - 8)}${apiKey.slice(-4)}`;
+}
 
-  const credentials = loadCredentials();
-  console.log("Credentials:");
-  console.log(`  Client ID: ${credentials.clientId}\n`);
+async function runKeyCheck(): Promise<void> {
+  console.log("=== Gloo AI API Key Inspection ===\n");
 
-  const tokenResponse = await getAccessToken(credentials);
-  const accessToken = tokenResponse.access_token;
+  const apiKey = loadApiKey();
+  console.log(`API key: ${maskApiKey(apiKey)} (${apiKey.length} chars)\n`);
 
-  if (!accessToken) {
-    throw new Error("Access token missing from token response.");
-  }
-
-  const decoded = jwt.decode(accessToken) as JwtPayload | null;
-
+  // WorkOS API keys are opaque bearer credentials, not JWTs, so there are
+  // no claims to decode. Report that plainly instead of failing.
+  const decoded = jwt.decode(apiKey) as JwtPayload | null;
   if (!decoded) {
-    throw new Error("Failed to decode JWT token.");
+    console.log(
+      "This key does not decode as a JWT (expected: WorkOS API keys are opaque)."
+    );
+    return;
   }
 
   console.log("Token Claims:");
@@ -113,7 +114,7 @@ async function runJwtCheck(): Promise<void> {
 
 loadEnv({ path: ".env.local" });
 
-runJwtCheck().catch((error) => {
-  console.error("Error validating JWT:", error);
+runKeyCheck().catch((error) => {
+  console.error("Error inspecting API key:", error);
   process.exitCode = 1;
 });

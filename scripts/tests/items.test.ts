@@ -120,28 +120,25 @@ it("throws when publisher ID is missing", () => {
 });
 
 it("runs the items example with mocked network calls", async () => {
-  process.env.GLOO_CLIENT_ID = "id";
-  process.env.GLOO_CLIENT_SECRET = "secret";
+  process.env.GLOO_AI_API_KEY = "key123";
   process.env.GLOO_PUBLISHER_ID = "publisher-123";
 
-  vi.spyOn(globalThis, "fetch")
-    .mockImplementationOnce(() => mockFetch({ access_token: "token123" }))
-    .mockImplementationOnce(() =>
-      mockFetch([
-        {
-          item_id: "item-1",
-          status: "active",
-          item_title: "First Item",
-          filename: "first.txt",
-        },
-        {
-          item_id: "item-2",
-          status: "pending",
-          item_title: "Second Item",
-          filename: "second.txt",
-        },
-      ])
-    );
+  vi.spyOn(globalThis, "fetch").mockImplementationOnce(() =>
+    mockFetch([
+      {
+        item_id: "item-1",
+        status: "active",
+        item_title: "First Item",
+        filename: "first.txt",
+      },
+      {
+        item_id: "item-2",
+        status: "pending",
+        item_title: "Second Item",
+        filename: "second.txt",
+      },
+    ])
+  );
 
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 

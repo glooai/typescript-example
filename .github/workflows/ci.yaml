@@ -6,8 +6,7 @@ on:
       - main
 
 env:
-  GLOO_AI_CLIENT_ID: test-gloo-ai-client-id
-  GLOO_AI_CLIENT_SECRET: test-gloo-ai-client-secret
+  GLOO_AI_API_KEY: test-gloo-ai-api-key
   NODE_VERSION: "20"
 
 jobs:
@@ -114,6 +113,11 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    # Real key so the integration suite (completions-v2-moderation,
+    # ai-sdk-structured-refusal) makes live, billed calls against the
+    # Gloo AI API on every PR instead of skipping on the placeholder.
+    env:
+      GLOO_AI_API_KEY: ${{ secrets.GLOO_AI_API_KEY }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -133,12 +137,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Debug key presence (temporary, prints length only)
+        run: |
+          echo "GLOO_AI_API_KEY length: ${#GLOO_AI_API_KEY}"
+          echo "starts with test-: $(echo "$GLOO_AI_API_KEY" | grep -c '^test-' || true)"
+
       - name: Test
         run: pnpm run test
 
   test-coverage:
     name: test:coverage
     runs-on: ubuntu-latest
+    env:
+      GLOO_AI_API_KEY: ${{ secrets.GLOO_AI_API_KEY }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

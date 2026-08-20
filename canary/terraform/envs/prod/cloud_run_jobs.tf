@@ -19,12 +19,8 @@ locals {
   ]
   shared_secrets = [
     {
-      env_name   = "GLOO_AI_CLIENT_ID"
-      secret_key = "gloo-ai-canary-client-id"
-    },
-    {
-      env_name   = "GLOO_AI_CLIENT_SECRET"
-      secret_key = "gloo-ai-canary-client-secret"
+      env_name   = "GLOO_AI_API_KEY"
+      secret_key = "gloo-ai-canary-api-key"
     },
     {
       env_name   = "ALERTS_SLACK_BOT_TOKEN"

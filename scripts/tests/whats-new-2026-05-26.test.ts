@@ -315,9 +315,8 @@ it("checkErrorClarity sends the invalid model and classifies the response", asyn
   expect(bodies[0]).toContain(INVALID_PROBE_MODEL);
 });
 
-it("runWhatsNewChecks stitches token + 3 probes into one report", async () => {
+it("runWhatsNewChecks stitches 3 probes into one report", async () => {
   vi.spyOn(globalThis, "fetch")
-    .mockImplementationOnce(async () => jsonResponse({ access_token: "tok" }))
     .mockImplementationOnce(async () => jsonResponse({ data: fullRegistry() }))
     .mockImplementationOnce(async () =>
       jsonResponse({ usage: { cache_tokens: 5, cache_hit_rate: 0.25 } })
@@ -326,27 +325,16 @@ it("runWhatsNewChecks stitches token + 3 probes into one report", async () => {
       jsonResponse({ detail: "Unknown model" }, 422)
     );
 
-  const report = await runWhatsNewChecks({ clientId: "id", clientSecret: "s" });
+  const report = await runWhatsNewChecks("key123");
   expect(report.models.every((m) => m.status === "PRESENT")).toBe(true);
   expect(report.cache.status).toBe("METRICS_PRESENT");
   expect(report.errorClarity.classification).toBe("ACTIONABLE_CLIENT_ERROR");
 });
 
-it("runWhatsNewChecks throws when no access token comes back", async () => {
-  vi.spyOn(globalThis, "fetch").mockImplementationOnce(async () =>
-    jsonResponse({})
-  );
-  await expect(
-    runWhatsNewChecks({ clientId: "id", clientSecret: "s" })
-  ).rejects.toThrow(/Access token/);
-});
-
 it("main() prints a report and an ABSENT note when models are missing", async () => {
-  process.env.GLOO_CLIENT_ID = "id";
-  process.env.GLOO_CLIENT_SECRET = "secret";
+  process.env.GLOO_AI_API_KEY = "key123";
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(globalThis, "fetch")
-    .mockImplementationOnce(async () => jsonResponse({ access_token: "tok" }))
     // skinny registry → most models ABSENT, exercising the note branch
     .mockImplementationOnce(async () =>
       jsonResponse({
