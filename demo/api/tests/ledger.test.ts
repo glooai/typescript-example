@@ -49,11 +49,22 @@ describe("ledger keys", () => {
     expect(ledgerPartition(at)).toBe("LEDGER#2026-08-11");
   });
 
-  it("reads today and yesterday so a midnight rollover is not an empty feed", () => {
+  it("reads back across the whole retention window, newest day first", () => {
     expect(recentLedgerPartitions(at)).toEqual([
       "LEDGER#2026-08-11",
       "LEDGER#2026-08-10",
+      "LEDGER#2026-08-09",
+      "LEDGER#2026-08-08",
+      "LEDGER#2026-08-07",
+      "LEDGER#2026-08-06",
+      "LEDGER#2026-08-05",
     ]);
+  });
+
+  it("crosses a month boundary rather than decrementing the day number", () => {
+    expect(
+      recentLedgerPartitions(new Date("2026-09-02T00:30:00.000Z"), 3)
+    ).toEqual(["LEDGER#2026-09-02", "LEDGER#2026-09-01", "LEDGER#2026-08-31"]);
   });
 });
 

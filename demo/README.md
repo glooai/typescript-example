@@ -13,9 +13,11 @@ Two things are on show, both against live traffic:
    answers side by side with measured latency and cost, flagging the fastest
    and cheapest.
 
-A third view, **Observed**, reads back the request ledger so the cost and
-latency figures are averages over calls this demo actually made, not list
-price arithmetic on invented token counts.
+A third view, **Observed**, reads back the request ledger and charts it, so
+the cost and latency figures are measurements of calls this demo actually
+made rather than list price arithmetic on invented token counts. The ledger
+is keyed by calendar day and nothing else, so this view is every visitor's
+traffic pooled, not the current browser's.
 
 ## Layout
 
@@ -99,6 +101,27 @@ one. An explicit choice in `localStorage` wins; with no choice stored the OS
 `prefers-color-scheme` decides, including when it changes mid-visit. The
 toggle in the header shows the theme it switches to.
 
+### Charts
+
+Observed draws three charts with Recharts: latency per call with a trailing
+moving average over it, a bubble plot of average cost against average
+latency with one bubble per model sized by call volume, and call volume with
+spend bucketed by hour or by day depending on how far the ledger reaches
+back. The rolling average is what makes the latency chart readable, since a
+single cold start is a real measurement but not the trend.
+
+Recharts renders SVG and takes every colour as an element prop, so it
+understands neither a CSS custom property nor a `dark:` variant. The chart
+palette is still declared in `index.css` alongside the rest of the theme and
+read back off the root element with `getComputedStyle`, re-read when the
+theme class changes, so there is one place colours are defined rather than
+two. Tooltips are ordinary elements in the app's semantic classes, so they
+need no colour props at all.
+
+The library is most of the bundle and only one of the three views uses it,
+so Observed is loaded with `React.lazy`: Chat, the view every visitor lands
+on, does not pay for the charts.
+
 ### Streaming vs buffering
 
 `/api/chat` streams. The server writes Gloo's SSE straight into a chunked
@@ -142,9 +165,11 @@ Both entity types also carry an anonymous visitor trace, described below.
 DynamoDB rather than Postgres because it costs nothing at rest, needs no
 migration before a deploy, and there is nothing relational about two
 independent key-addressed entity types. No secondary indexes, because every
-read is a Query against a known partition key. The ledger partition is the UTC calendar day rather than a constant, so
-writes rotate instead of concentrating on one partition forever; reads cover
-today and yesterday and merge.
+read is a Query against a known partition key. The ledger partition is the
+UTC calendar day rather than a constant, so writes rotate instead of
+concentrating on one partition forever; a read fans one Query out per day in
+the seven-day retention window and merges the results, which is what gives
+the Observed charts something to plot a trend across.
 
 Costs are computed from the live `platform/v2/models` registry (which
 publishes per-million-token rates) multiplied by the token counts Gloo

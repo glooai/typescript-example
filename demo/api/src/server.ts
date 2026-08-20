@@ -50,7 +50,12 @@ import {
   type VisitorContext,
 } from "./visitor.js";
 
-const LEDGER_PAGE_SIZE = 40;
+/**
+ * Deep enough that a rolling average over the Observed view's trend charts
+ * has something to smooth, small enough that the response stays well under
+ * a hundred kilobytes of small rows.
+ */
+const LEDGER_PAGE_SIZE = 200;
 
 /**
  * Nothing here takes a large body: the biggest is a chat transcript. Capping

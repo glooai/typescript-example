@@ -74,6 +74,25 @@
   --danger-text: #9b1c1c;
   --danger-surface: #fdf2f2;
   --danger-line: #efc0c0;
+
+  /* Charts. Recharts takes colours as element props and understands neither
+     a custom property nor a Tailwind class, so these are read back with
+     getComputedStyle rather than referenced in a className. Keeping them
+     here anyway means the two themes still stay one block of values each.
+
+     The light series are darkened forms: the dark palette's brightness is
+     what makes a 2px stroke readable on near-black and what makes the same
+     stroke wash out on white. Series 1 tracks the accent in both themes so
+     the primary line on a chart is the same colour as the accent text
+     beside it. */
+  --chart-1: #8a6200;
+  --chart-2: #1668b8;
+  --chart-3: #1a7f5a;
+  --chart-4: #6d45c9;
+  --chart-5: #c0512a;
+  --chart-6: #b5307a;
+  --chart-grid: #e8e5dc;
+  --chart-axis: #61616b;
 }
 
 :root.dark {
@@ -96,6 +115,15 @@
   --danger-text: #fca5a5;
   --danger-surface: #24100f;
   --danger-line: #5c1d1d;
+
+  --chart-1: #ffd727;
+  --chart-2: #56b6ff;
+  --chart-3: #4fd6a8;
+  --chart-4: #b58cff;
+  --chart-5: #ff8f6b;
+  --chart-6: #ff7ab8;
+  --chart-grid: #24242c;
+  --chart-axis: #6b6b76;
 }
 
 html,
