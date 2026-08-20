@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { historyEntries, relativeTime } from "../src/sessions";
+import {
+  groupHistoryEntries,
+  historyEntries,
+  mergeSessionPage,
+  relativeTime,
+  sessionsPath,
+} from "../src/sessions";
 import type { SessionSummary } from "../src/types";
 
 const now = Date.parse("2026-08-11T12:00:00.000Z");
@@ -113,5 +119,60 @@ describe("historyEntries", () => {
     const entries = historyEntries([session({ id: "s-1" })], "s-fresh", now);
 
     expect(entries.every((entry) => !entry.active)).toBe(true);
+  });
+});
+
+describe("groupHistoryEntries", () => {
+  it("separates pinned conversations from the rest, order preserved", () => {
+    const entries = historyEntries(
+      [
+        session({ id: "p-1", pinned: true }),
+        session({ id: "r-1" }),
+        session({ id: "p-2", pinned: true }),
+        session({ id: "r-2" }),
+      ],
+      "r-1",
+      now
+    );
+
+    const groups = groupHistoryEntries(entries);
+
+    expect(groups.pinned.map((entry) => entry.id)).toEqual(["p-1", "p-2"]);
+    expect(groups.recent.map((entry) => entry.id)).toEqual(["r-1", "r-2"]);
+  });
+});
+
+describe("sessionsPath", () => {
+  it("asks for the plain recent list when nothing is filtered", () => {
+    expect(sessionsPath()).toBe("/api/sessions");
+    expect(sessionsPath({ archived: false, query: "  ", cursor: null })).toBe(
+      "/api/sessions"
+    );
+  });
+
+  it("carries the filter, the search, and the cursor together", () => {
+    expect(
+      sessionsPath({ archived: true, query: " psalm 23 ", cursor: "abc=" })
+    ).toBe("/api/sessions?archived=1&q=psalm+23&cursor=abc%3D");
+  });
+});
+
+describe("mergeSessionPage", () => {
+  it("appends the next page", () => {
+    expect(
+      mergeSessionPage(
+        [session({ id: "a" })],
+        [session({ id: "b" }), session({ id: "c" })]
+      ).map((entry) => entry.id)
+    ).toEqual(["a", "b", "c"]);
+  });
+
+  it("keeps a conversation that moved between reads in its first place", () => {
+    expect(
+      mergeSessionPage(
+        [session({ id: "a" }), session({ id: "b" })],
+        [session({ id: "b" }), session({ id: "c" })]
+      ).map((entry) => entry.id)
+    ).toEqual(["a", "b", "c"]);
   });
 });

@@ -12,8 +12,9 @@ import type {
   ModelSummary,
   RoutingSelection,
   SessionPatch,
-  SessionSummary,
+  SessionsPage,
 } from "./types";
+import { sessionsPath, type SessionsQuery } from "./sessions";
 
 const SESSION_STORAGE_KEY = "gloo-demo-session-id";
 
@@ -79,19 +80,21 @@ export async function fetchSession(
 }
 
 /**
- * This browser's past conversations. The server answers from the anonymous
- * visitor cookie, so a browser that refuses cookies gets an empty list rather
- * than an error, and the caller renders that as "no history yet".
+ * One page of this browser's past conversations. The server answers from the
+ * anonymous visitor cookie, so a browser that refuses cookies gets an empty
+ * page rather than an error, and the caller renders that as "no history yet".
+ *
+ * Searching and paging are both the server's: it already reads the visitor's
+ * whole partition to order it, so a query there covers conversations this
+ * browser has not paged in, which a filter over the loaded rows would miss.
  */
 export async function fetchSessions(
-  options: { archived?: boolean; signal?: AbortSignal } = {}
-): Promise<SessionSummary[]> {
-  const response = await fetch(
-    options.archived ? "/api/sessions?archived=1" : "/api/sessions",
-    { signal: options.signal }
-  );
-  const body = await readJson<{ sessions: SessionSummary[] }>(response);
-  return body.sessions;
+  options: SessionsQuery & { signal?: AbortSignal } = {}
+): Promise<SessionsPage> {
+  const response = await fetch(sessionsPath(options), {
+    signal: options.signal,
+  });
+  return readJson<SessionsPage>(response);
 }
 
 /** Pin, rename, or archive one of this browser's own past conversations. */

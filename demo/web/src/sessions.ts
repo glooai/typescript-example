@@ -82,3 +82,63 @@ export function historyEntries(
     archived: session.archived,
   }));
 }
+
+/**
+ * The two groups the sidebar labels separately when nothing is being searched.
+ *
+ * Pinned conversations sit above every recent one whatever their age, which is
+ * the whole point of pinning and is also the one thing about this list that
+ * reads as a bug when it is not spelled out: a chat sent a moment ago
+ * appearing second, under one from an hour before, looks broken until the
+ * heading says the one above it is pinned. Under a search the split is
+ * dropped, because there the order is relevance and a "Pinned" heading would
+ * be describing something that is no longer deciding the order.
+ */
+export function groupHistoryEntries(entries: HistoryEntry[]): {
+  pinned: HistoryEntry[];
+  recent: HistoryEntry[];
+} {
+  return {
+    pinned: entries.filter((entry) => entry.pinned),
+    recent: entries.filter((entry) => !entry.pinned),
+  };
+}
+
+/** What `GET /api/sessions` is asked for: which list, matching what, from where. */
+export type SessionsQuery = {
+  archived?: boolean;
+  query?: string;
+  cursor?: string | null;
+};
+
+export function sessionsPath(options: SessionsQuery = {}): string {
+  const params = new URLSearchParams();
+  if (options.archived) {
+    params.set("archived", "1");
+  }
+  const query = options.query?.trim();
+  if (query) {
+    params.set("q", query);
+  }
+  if (options.cursor) {
+    params.set("cursor", options.cursor);
+  }
+  const search = params.toString();
+  return search ? `/api/sessions?${search}` : "/api/sessions";
+}
+
+/**
+ * Append the next page to what is already on screen, dropping any
+ * conversation that appears twice. A duplicate is not a server fault: the
+ * cursor names a position in an order derived from `last_message_at` and
+ * `pinned`, and a conversation spoken to or pinned between two page reads
+ * genuinely moves, so the row can land in both pages. Keeping the first copy
+ * keeps it where the visitor already saw it.
+ */
+export function mergeSessionPage(
+  loaded: SessionSummary[],
+  next: SessionSummary[]
+): SessionSummary[] {
+  const seen = new Set(loaded.map((session) => session.id));
+  return [...loaded, ...next.filter((session) => !seen.has(session.id))];
+}
