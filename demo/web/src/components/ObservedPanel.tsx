@@ -38,6 +38,7 @@ import {
   type CallPoint,
   type TrendBucket,
 } from "../observed";
+import { useIsMobileViewport } from "../responsive";
 import type { LedgerModelRollup, LedgerRow } from "../types";
 import { ErrorNote, Panel } from "./ui";
 
@@ -96,11 +97,16 @@ function latencyTick(value: number): string {
     : `${(value / 1000).toFixed(1)}s`;
 }
 
-/** Shared axis styling, so the three charts read as one set. */
-function axisProps(palette: ChartPalette) {
+/**
+ * Shared axis styling, so the three charts read as one set. Recharts sizes
+ * axes in pixels and cannot see a media query, so the phone layout has to be
+ * passed down: at 375px the desktop gutters leave a plot area narrower than
+ * the axis labels around it.
+ */
+function axisProps(palette: ChartPalette, compact: boolean) {
   return {
     stroke: palette.axis,
-    tick: { fill: palette.axis, fontSize: 11 },
+    tick: { fill: palette.axis, fontSize: compact ? 10 : 11 },
     tickLine: false,
     axisLine: { stroke: palette.grid },
   } as const;
@@ -217,15 +223,17 @@ function ChartNote({ message }: { message: string }) {
 function LatencyTrend({
   points,
   palette,
+  compact,
 }: {
   points: CallPoint[];
   palette: ChartPalette;
+  compact: boolean;
 }) {
   if (points.length < 2) {
     return <ChartNote message="Two successful calls draw the first trend." />;
   }
 
-  const axis = axisProps(palette);
+  const axis = axisProps(palette, compact);
 
   // The X axis is the call sequence, not elapsed time, so a burst does not
   // squash into a sliver next to a quiet day. The ticks still carry when
@@ -259,7 +267,7 @@ function LatencyTrend({
             {...axis}
             dataKey="seq"
             interval="preserveStartEnd"
-            minTickGap={80}
+            minTickGap={compact ? 48 : 80}
             tickFormatter={(value: number) => {
               const at = points[value - 1]?.timestamp;
               if (at === undefined) {
@@ -268,7 +276,11 @@ function LatencyTrend({
               return multiDay ? dateLabel(at) : timeLabel(at);
             }}
           />
-          <YAxis {...axis} width={52} tickFormatter={latencyTick} />
+          <YAxis
+            {...axis}
+            width={compact ? 38 : 52}
+            tickFormatter={latencyTick}
+          />
           <Tooltip
             cursor={{ stroke: palette.axis, strokeDasharray: "3 3" }}
             content={
@@ -328,21 +340,25 @@ function LatencyTrend({
 function ModelScatter({
   rollups,
   palette,
+  compact,
 }: {
   rollups: LedgerModelRollup[];
   palette: ChartPalette;
+  compact: boolean;
 }) {
   if (rollups.length === 0) {
     return <ChartNote message="No successful calls to compare yet." />;
   }
 
-  const axis = axisProps(palette);
+  const axis = axisProps(palette, compact);
   const maxCalls = Math.max(...rollups.map((rollup) => rollup.calls));
 
   return (
     <div className="h-56 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <ScatterChart margin={{ top: 10, right: 16, bottom: 4, left: 0 }}>
+        <ScatterChart
+          margin={{ top: 10, right: compact ? 6 : 16, bottom: 4, left: 0 }}
+        >
           <CartesianGrid stroke={palette.grid} />
           <XAxis
             {...axis}
@@ -350,7 +366,7 @@ function ModelScatter({
             dataKey="avgLatencyMs"
             name="Avg latency"
             domain={["auto", "auto"]}
-            padding={{ left: 28, right: 28 }}
+            padding={{ left: compact ? 16 : 28, right: compact ? 16 : 28 }}
             tickFormatter={latencyTick}
           />
           <YAxis
@@ -358,7 +374,7 @@ function ModelScatter({
             type="number"
             dataKey="avgCostUsd"
             name="Avg cost"
-            width={66}
+            width={compact ? 56 : 66}
             domain={["auto", "auto"]}
             padding={{ top: 20, bottom: 20 }}
             tickFormatter={costTick}
@@ -418,16 +434,18 @@ function TrafficTrend({
   buckets,
   granularity,
   palette,
+  compact,
 }: {
   buckets: TrendBucket[];
   granularity: BucketGranularity;
   palette: ChartPalette;
+  compact: boolean;
 }) {
   if (buckets.length === 0) {
     return <ChartNote message="Nothing has been recorded yet." />;
   }
 
-  const axis = axisProps(palette);
+  const axis = axisProps(palette, compact);
 
   return (
     <div className="h-56 w-full">
@@ -441,15 +459,20 @@ function TrafficTrend({
             {...axis}
             dataKey="start"
             interval="preserveStartEnd"
-            minTickGap={40}
+            minTickGap={compact ? 32 : 40}
             tickFormatter={(value: number) => bucketLabel(value, granularity)}
           />
-          <YAxis {...axis} yAxisId="calls" width={32} allowDecimals={false} />
+          <YAxis
+            {...axis}
+            yAxisId="calls"
+            width={compact ? 24 : 32}
+            allowDecimals={false}
+          />
           <YAxis
             {...axis}
             yAxisId="cost"
             orientation="right"
-            width={66}
+            width={compact ? 56 : 66}
             tickFormatter={costTick}
           />
           <Tooltip
@@ -563,6 +586,7 @@ export function ObservedPanel() {
   const [loaded, setLoaded] = useState(false);
 
   const palette = useChartPalette();
+  const compact = useIsMobileViewport();
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -611,7 +635,7 @@ export function ObservedPanel() {
           type="button"
           onClick={() => void load()}
           disabled={loading}
-          className="ml-auto rounded-lg border border-line px-3 py-1.5 text-xs text-soft transition hover:border-accent hover:text-body disabled:opacity-50"
+          className="ml-auto inline-flex items-center rounded-lg border border-line px-3 py-1.5 text-xs text-soft transition hover:border-accent hover:text-body disabled:opacity-50 pointer-coarse:min-h-11"
         >
           {loading ? "Reading" : "Refresh"}
         </button>
@@ -654,7 +678,7 @@ export function ObservedPanel() {
             title="Observed latency"
             hint={`per call, smoothed over ${rollingWindow(points.length)}`}
           >
-            <LatencyTrend points={points} palette={palette} />
+            <LatencyTrend points={points} palette={palette} compact={compact} />
           </ChartCard>
 
           <div className="grid gap-4 xl:grid-cols-2">
@@ -662,7 +686,11 @@ export function ObservedPanel() {
               title="Cost against latency"
               hint="one bubble per model, sized by call volume"
             >
-              <ModelScatter rollups={rollups} palette={palette} />
+              <ModelScatter
+                rollups={rollups}
+                palette={palette}
+                compact={compact}
+              />
             </ChartCard>
 
             <ChartCard
@@ -675,6 +703,7 @@ export function ObservedPanel() {
                 buckets={buckets}
                 granularity={granularity}
                 palette={palette}
+                compact={compact}
               />
             </ChartCard>
           </div>

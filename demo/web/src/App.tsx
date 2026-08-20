@@ -42,20 +42,27 @@ export function App() {
   }, []);
 
   return (
-    <div className="mx-auto flex h-dvh max-w-6xl flex-col gap-5 px-5 py-6">
-      <header className="flex flex-none flex-wrap items-center gap-x-4 gap-y-3">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">
+    <div className="mx-auto flex h-dvh max-w-6xl flex-col gap-4 px-4 py-4 sm:gap-5 sm:px-5 sm:py-6">
+      {/* Two rows on a phone (title with the theme toggle, then the tabs across
+          the full width) and the original single row from `sm` up, which is the
+          narrowest viewport all three fit on without wrapping. */}
+      <header className="grid flex-none grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 sm:flex sm:flex-wrap sm:gap-x-4">
+        <div className="min-w-0">
+          <h1 className="truncate text-base font-semibold tracking-tight sm:text-lg">
             Gloo AI <span className="text-accent">Completions V2</span>
           </h1>
-          <p className="text-xs text-muted">
+          <p className="hidden text-xs text-muted sm:block">
             Chat, compare models side by side, and see real cost and speed.
           </p>
         </div>
 
+        <div className="col-start-2 row-start-1 sm:order-last">
+          <ThemeToggle />
+        </div>
+
         <nav
           aria-label="Views"
-          className="ml-auto flex rounded-xl border border-line bg-surface p-1"
+          className="col-span-2 row-start-2 flex rounded-xl border border-line bg-surface p-1 sm:ml-auto"
         >
           {TABS.map((entry) => (
             <button
@@ -63,7 +70,7 @@ export function App() {
               type="button"
               aria-current={tab === entry.id ? "page" : undefined}
               onClick={() => setTab(entry.id)}
-              className={`rounded-lg px-3.5 py-1.5 text-sm transition ${
+              className={`inline-flex min-h-11 flex-1 items-center justify-center rounded-lg px-3.5 text-sm transition sm:min-h-8 sm:flex-none ${
                 tab === entry.id
                   ? "bg-raised text-body"
                   : "text-muted hover:bg-inset hover:text-soft"
@@ -73,8 +80,6 @@ export function App() {
             </button>
           ))}
         </nav>
-
-        <ThemeToggle />
       </header>
 
       <main className="flex min-h-0 flex-1 flex-col">

@@ -38,6 +38,7 @@
   --color-accent-solid: var(--accent-solid);
   --color-accent-solid-hover: var(--accent-solid-hover);
   --color-on-accent: var(--on-accent);
+  --color-scrim: var(--scrim);
   --color-danger: var(--danger-text);
   --color-danger-surface: var(--danger-surface);
   --color-danger-line: var(--danger-line);
@@ -71,6 +72,10 @@
   --accent-solid: #ffd727;
   --accent-solid-hover: #f6c414;
   --on-accent: #08080a;
+  /* Behind the history drawer below `md`. Darkening is the only direction that
+     reads as "behind" in both themes: a light scrim over the light ground
+     would leave the transcript looking merely faded. */
+  --scrim: rgb(22 22 26 / 0.4);
   --danger-text: #9b1c1c;
   --danger-surface: #fdf2f2;
   --danger-line: #efc0c0;
@@ -112,6 +117,7 @@
   --accent-solid: #ffd727;
   --accent-solid-hover: #ffde4b;
   --on-accent: #08080a;
+  --scrim: rgb(0 0 0 / 0.6);
   --danger-text: #fca5a5;
   --danger-surface: #24100f;
   --danger-line: #5c1d1d;
@@ -209,8 +215,13 @@ body {
   padding-left: 0.75rem;
   color: var(--soft-text);
 }
+/* A markdown table is the one block whose width the model chooses, so it is
+   the one block that can push a phone-width column sideways. Scrolling it in
+   place keeps the page itself free of horizontal overflow. */
 .md table {
-  width: 100%;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
   font-size: 0.875em;
 }

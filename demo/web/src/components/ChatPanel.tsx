@@ -12,6 +12,7 @@ import {
   formatTokens,
   shortModelName,
 } from "../format";
+import { useIsMobileViewport } from "../responsive";
 import type {
   CallMetrics,
   ChatMessage,
@@ -30,6 +31,20 @@ const SUGGESTIONS = [
   "Draft a three point outline for a sermon on Psalm 23.",
   "Explain the difference between grace and mercy in two paragraphs.",
 ];
+
+/** Phosphor Icons "list", regular weight, inlined as ThemeToggle does it. */
+function MenuIcon() {
+  return (
+    <svg
+      viewBox="0 0 256 256"
+      fill="currentColor"
+      aria-hidden="true"
+      className="size-[1.125rem]"
+    >
+      <path d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM40,72H216a8,8,0,0,0,0-16H40a8,8,0,0,0,0,16ZM216,184H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Z" />
+    </svg>
+  );
+}
 
 function MetricsStrip({ metrics }: { metrics: CallMetrics }) {
   return (
@@ -69,6 +84,11 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
   // position, and its generated name, without polling for either.
   const [historyRefresh, setHistoryRefresh] = useState(0);
 
+  // Below `md` the history is an off-canvas drawer over the transcript; from
+  // `md` up it is the inline rail this state has no say over.
+  const isMobile = useIsMobileViewport();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -89,6 +109,27 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
     return () => controller.abort();
   }, [sessionId]);
 
+  // Growing past the breakpoint leaves the rail inline, so a drawer left open
+  // must not reappear over the transcript on the way back to a phone width.
+  useEffect(() => {
+    if (!isMobile) {
+      setDrawerOpen(false);
+    }
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (!drawerOpen) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setDrawerOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [drawerOpen]);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
@@ -102,6 +143,12 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
    * never briefly shown under the new one's id.
    */
   function openSession(nextId: string) {
+    // The drawer covers the transcript it was opened from, so choosing a
+    // conversation has to reveal it. On desktop the rail is beside the
+    // transcript and closing it would take away what was just used.
+    if (isMobile) {
+      setDrawerOpen(false);
+    }
     if (nextId === sessionId) {
       return;
     }
@@ -112,6 +159,9 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
   }
 
   function newChat() {
+    if (isMobile) {
+      setDrawerOpen(false);
+    }
     abortRef.current?.abort();
     setError(null);
     setTurns([]);
@@ -176,7 +226,15 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
   const streamingEmpty =
     busy && lastTurn?.role === "assistant" && lastTurn.content.length === 0;
   return (
-    <div className="flex min-h-0 flex-1 gap-5">
+    <div className="flex min-h-0 flex-1 md:gap-5">
+      {isMobile && drawerOpen && (
+        <div
+          aria-hidden="true"
+          onClick={() => setDrawerOpen(false)}
+          className="fixed inset-0 z-30 bg-scrim"
+        />
+      )}
+
       {/* The sidebar is the Chat view's and not the shell's: Compare and
           Observed have no conversations to list, so a rail at the App level
           would be an empty column on two of three tabs. */}
@@ -184,17 +242,31 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
         currentId={sessionId}
         onOpen={openSession}
         onNewChat={newChat}
+        onClose={() => setDrawerOpen(false)}
+        open={!isMobile || drawerOpen}
         refreshToken={historyRefresh}
       />
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4">
-        <Panel className="px-4 py-3">
-          <RoutingPicker
-            value={routing}
-            onChange={setRouting}
-            models={models}
-          />
-        </Panel>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+        <div className="flex flex-none items-start gap-2">
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Show chat history"
+            aria-expanded={drawerOpen}
+            aria-controls="chat-history"
+            className="flex min-h-11 w-11 flex-none items-center justify-center rounded-xl border border-line bg-surface text-muted transition hover:border-accent hover:text-body md:hidden"
+          >
+            <MenuIcon />
+          </button>
+          <Panel className="min-w-0 flex-1 px-4 py-3">
+            <RoutingPicker
+              value={routing}
+              onChange={setRouting}
+              models={models}
+            />
+          </Panel>
+        </div>
 
         {error && <ErrorNote message={error} />}
 
@@ -213,7 +285,7 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
                     key={suggestion}
                     type="button"
                     onClick={() => void send(suggestion)}
-                    className="rounded-full border border-line bg-surface px-3.5 py-1.5 text-xs text-soft transition hover:border-accent hover:text-body"
+                    className="inline-flex min-h-11 items-center rounded-full border border-line bg-surface px-4 py-1.5 text-xs text-soft transition hover:border-accent hover:text-body sm:min-h-0 sm:px-3.5"
                   >
                     {suggestion}
                   </button>
@@ -256,13 +328,13 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
             placeholder="Send a message"
             aria-label="Message"
             disabled={busy}
-            className="flex-1 rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none transition placeholder:text-muted focus:border-accent disabled:opacity-60"
+            className="min-w-0 flex-1 rounded-xl border border-line bg-surface px-4 py-3 text-base outline-none transition placeholder:text-muted focus:border-accent disabled:opacity-60 sm:text-sm"
           />
           {busy ? (
             <button
               type="button"
               onClick={() => abortRef.current?.abort()}
-              className="rounded-xl border border-line-strong px-5 py-3 text-sm font-medium text-soft transition hover:text-body"
+              className="flex-none rounded-xl border border-line-strong px-4 py-3 text-sm font-medium text-soft transition hover:text-body sm:px-5"
             >
               Stop
             </button>
@@ -270,7 +342,7 @@ export function ChatPanel({ models }: { models: ModelSummary[] }) {
             <button
               type="submit"
               disabled={input.trim().length === 0}
-              className="rounded-xl bg-accent-solid px-5 py-3 text-sm font-semibold text-on-accent transition hover:bg-accent-solid-hover disabled:opacity-40"
+              className="flex-none rounded-xl bg-accent-solid px-4 py-3 text-sm font-semibold text-on-accent transition hover:bg-accent-solid-hover disabled:opacity-40 sm:px-5"
             >
               Send
             </button>

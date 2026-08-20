@@ -65,11 +65,13 @@ function ResultCard({
   return (
     <Panel className="flex min-h-0 flex-col overflow-hidden">
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
-        <span className="font-mono text-sm text-accent">
+        <span className="min-w-0 break-all font-mono text-sm text-accent">
           {shortModelName(result.resolvedModel)}
         </span>
-        <span className="text-xs text-muted">via {result.requested}</span>
-        <span className="ml-auto flex gap-1.5">
+        <span className="min-w-0 break-all text-xs text-muted">
+          via {result.requested}
+        </span>
+        <span className="ml-auto flex flex-none gap-1.5">
           {badges.map((badge) => (
             <Badge key={badge}>{badge}</Badge>
           ))}
@@ -146,7 +148,7 @@ export function ComparePanel({ models }: { models: ModelSummary[] }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
-      <Panel className="flex flex-col gap-4 p-4">
+      <Panel className="flex min-w-0 flex-col gap-4 p-4">
         <label className="flex flex-col gap-2">
           <span className="text-xs uppercase tracking-wider text-muted">
             Prompt
@@ -155,17 +157,17 @@ export function ComparePanel({ models }: { models: ModelSummary[] }) {
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             rows={3}
-            className="resize-none rounded-xl border border-line bg-inset px-3.5 py-3 text-sm outline-none transition placeholder:text-muted focus:border-accent"
+            className="resize-none rounded-xl border border-line bg-inset px-3.5 py-3 text-base outline-none transition placeholder:text-muted focus:border-accent sm:text-sm"
           />
         </label>
 
-        <div className="flex flex-col gap-3">
+        <div className="flex min-w-0 flex-col gap-3">
           {variants.map((variant, index) => (
             <div
               key={index}
-              className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-inset px-3 py-2.5"
+              className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-line bg-inset px-3 py-2.5"
             >
-              <span className="font-mono text-xs text-muted">
+              <span className="flex-none font-mono text-xs text-muted">
                 {String(index + 1).padStart(2, "0")}
               </span>
               <RoutingPicker
@@ -182,7 +184,7 @@ export function ComparePanel({ models }: { models: ModelSummary[] }) {
                       current.filter((_, position) => position !== index)
                     )
                   }
-                  className="ml-auto text-xs text-muted transition hover:text-body"
+                  className="ml-auto inline-flex items-center text-xs text-muted transition hover:text-body pointer-coarse:min-h-11"
                 >
                   Remove
                 </button>
@@ -191,12 +193,12 @@ export function ComparePanel({ models }: { models: ModelSummary[] }) {
           ))}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <button
             type="button"
             onClick={() => void run()}
             disabled={busy || prompt.trim().length === 0}
-            className="rounded-xl bg-accent-solid px-5 py-2.5 text-sm font-semibold text-on-accent transition hover:bg-accent-solid-hover disabled:opacity-40"
+            className="rounded-xl bg-accent-solid px-5 py-3 text-sm font-semibold text-on-accent transition hover:bg-accent-solid-hover disabled:opacity-40 sm:py-2.5"
           >
             {busy ? "Running" : "Run comparison"}
           </button>
@@ -206,12 +208,12 @@ export function ComparePanel({ models }: { models: ModelSummary[] }) {
               onClick={() =>
                 setVariants((current) => [...current, { mode: "auto_routing" }])
               }
-              className="text-xs text-muted transition hover:text-body"
+              className="inline-flex items-center text-xs text-muted transition hover:text-body pointer-coarse:min-h-11"
             >
               Add a variant
             </button>
           )}
-          <span className="ml-auto text-xs text-muted">
+          <span className="w-full text-xs text-muted sm:ml-auto sm:w-auto">
             All variants run concurrently against the same prompt.
           </span>
         </div>

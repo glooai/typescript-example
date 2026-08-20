@@ -39,7 +39,7 @@ export function RoutingPicker({
   showTradition?: boolean;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-3">
       <Select
         label="Routing"
         value={value.mode}

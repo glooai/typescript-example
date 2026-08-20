@@ -13,12 +13,17 @@ export function Select({
   children: ReactNode;
 }) {
   return (
-    <label className="flex items-center gap-2 text-xs">
-      <span className="uppercase tracking-wider text-muted">{label}</span>
+    <label className="flex min-w-0 max-w-full items-center gap-2 text-xs">
+      <span className="flex-none uppercase tracking-wider text-muted">
+        {label}
+      </span>
+      {/* `text-base` under `sm`: iOS zooms the page in on focus for anything
+          smaller, and a select that fires a zoom is a select that leaves the
+          layout scrolled sideways. */}
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="rounded-lg border border-line-strong bg-inset px-2.5 py-1.5 text-sm text-body outline-none transition focus:border-accent"
+        className="min-w-0 flex-1 rounded-lg border border-line-strong bg-inset px-2.5 py-2.5 text-base text-body outline-none transition focus:border-accent sm:flex-none sm:py-1.5 sm:text-sm"
       >
         {children}
       </select>
@@ -37,12 +42,12 @@ export function Stat({
   accent?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex min-w-0 flex-col gap-0.5">
       <span className="text-[0.625rem] uppercase tracking-wider text-muted">
         {label}
       </span>
       <span
-        className={`font-mono text-xs ${accent ? "text-accent" : "text-body"}`}
+        className={`truncate font-mono text-xs ${accent ? "text-accent" : "text-body"}`}
       >
         {value}
       </span>

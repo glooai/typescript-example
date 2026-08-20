@@ -8,7 +8,7 @@ import remarkGfm from "remark-gfm";
  */
 export function Markdown({ children }: { children: string }) {
   return (
-    <div className="md text-[0.9375rem] leading-relaxed text-body">
+    <div className="md min-w-0 text-[0.9375rem] leading-relaxed break-words text-body">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
     </div>
   );
