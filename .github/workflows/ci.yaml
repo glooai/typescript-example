@@ -173,11 +173,21 @@ jobs:
         run: pnpm run test:coverage
 
   terraform-validate:
-    name: terraform:validate
+    name: terraform:validate (${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: canary
+            working-directory: canary/terraform/envs/prod
+            fmt-target: ".."
+          - name: demo
+            working-directory: demo/terraform
+            fmt-target: "."
     defaults:
       run:
-        working-directory: canary/terraform/envs/prod
+        working-directory: ${{ matrix.working-directory }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -188,7 +198,7 @@ jobs:
           terraform_version: 1.9.8
 
       - name: terraform fmt check
-        run: terraform fmt -check -recursive ..
+        run: terraform fmt -check -recursive ${{ matrix.fmt-target }}
 
       - name: terraform init (no backend)
         run: terraform init -backend=false

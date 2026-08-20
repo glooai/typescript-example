@@ -1,6 +1,9 @@
 packages:
   - canary
   - chatbot
+  - demo/api
+  - demo/web
   - scripts
+
 onlyBuiltDependencies:
   - esbuild

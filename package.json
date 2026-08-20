@@ -14,6 +14,8 @@
     "test": "turbo run test",
     "test:coverage": "turbo run test:coverage",
     "canary:local": "pnpm --filter @glooai/canary run canary:local",
+    "demo:dev": "pnpm --filter @glooai/demo-web run dev",
+    "demo:deploy": "./demo/deploy.sh",
     "glooai:chat": "pnpm --filter @glooai/scripts run glooai:chat",
     "glooai:ingest": "pnpm --filter @glooai/scripts run glooai:ingest",
     "glooai:items": "pnpm --filter @glooai/scripts run glooai:items",
