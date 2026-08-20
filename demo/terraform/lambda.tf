@@ -95,6 +95,7 @@ resource "aws_lambda_function" "api" {
       DEMO_TABLE_NAME        = aws_dynamodb_table.demo.name
       GLOO_API_KEY_SECRET_ID = aws_secretsmanager_secret.gloo_api_key.arn
       ORIGIN_SECRET          = random_password.origin_secret.result
+      VISITOR_SALT           = random_password.visitor_salt.result
     }
   }
 

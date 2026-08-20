@@ -26,6 +26,7 @@ import type {
   LedgerModelRollup,
   LedgerRow,
 } from "./types.js";
+import type { VisitorTrace } from "./visitor.js";
 
 /** Ledger rows outlive a demo session but not a week. */
 export const LEDGER_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -38,7 +39,8 @@ export type LedgerItem = {
   entity: "ledger";
   expires_at: number;
   timestamp: string;
-} & CallMetrics;
+} & CallMetrics &
+  Partial<VisitorTrace>;
 
 export type SessionItem = {
   pk: string;
@@ -47,7 +49,10 @@ export type SessionItem = {
   expires_at: number;
   role: ChatMessage["role"];
   content: string;
-};
+} & Partial<VisitorTrace> & {
+    /** When this visitor last wrote to the conversation. */
+    visitor_seen_at?: string;
+  };
 
 /** UTC calendar day, the ledger partition key suffix. */
 export function ledgerPartition(at: Date): string {
@@ -63,7 +68,11 @@ export function recentLedgerPartitions(now: Date): string[] {
   return [ledgerPartition(now), ledgerPartition(yesterday)];
 }
 
-export function toLedgerItem(metrics: CallMetrics, at: Date): LedgerItem {
+export function toLedgerItem(
+  metrics: CallMetrics,
+  at: Date,
+  trace?: VisitorTrace
+): LedgerItem {
   const timestamp = at.toISOString();
   return {
     pk: ledgerPartition(at),
@@ -72,7 +81,31 @@ export function toLedgerItem(metrics: CallMetrics, at: Date): LedgerItem {
     expires_at: Math.floor(at.getTime() / 1000) + LEDGER_TTL_SECONDS,
     timestamp,
     ...metrics,
+    ...trace,
   };
+}
+
+/**
+ * Drop key and visitor attributes from a stored item before it goes back
+ * over the wire. The visitor trace stays server side: an IP hash has a use
+ * in CloudWatch and the console, and none in a bundle running on the
+ * visitor's own machine. The existing TTL covers the trace too, since it is
+ * written on these same rows and expires with them.
+ */
+export function toLedgerRow(item: LedgerItem): LedgerRow {
+  const {
+    pk: _pk,
+    sk: _sk,
+    entity: _entity,
+    expires_at: _expiresAt,
+    visitor_id: _visitorId,
+    visitor_id_source: _visitorIdSource,
+    visitor_ip_hash: _visitorIpHash,
+    visitor_user_agent: _visitorUserAgent,
+    visitor_session_id: _visitorSessionId,
+    ...row
+  } = item;
+  return row;
 }
 
 export function sessionKey(sessionId: string): string {
@@ -82,9 +115,13 @@ export function sessionKey(sessionId: string): string {
 export function toSessionItems(
   sessionId: string,
   messages: ChatMessage[],
-  at: Date
+  at: Date,
+  trace?: VisitorTrace
 ): SessionItem[] {
   const expiresAt = Math.floor(at.getTime() / 1000) + SESSION_TTL_SECONDS;
+  // The session id is already the partition key, so repeating it inside the
+  // trace on every message row buys nothing.
+  const { visitor_session_id: _sessionId, ...visitor } = trace ?? {};
   return messages.map((message, index) => ({
     pk: sessionKey(sessionId),
     // Zero-padded so lexicographic sort order matches conversation order.
@@ -93,6 +130,7 @@ export function toSessionItems(
     expires_at: expiresAt,
     role: message.role,
     content: message.content,
+    ...(trace ? { ...visitor, visitor_seen_at: at.toISOString() } : {}),
   }));
 }
 

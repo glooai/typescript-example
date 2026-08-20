@@ -7,9 +7,19 @@ import {
   rollupByModel,
   sortRowsNewestFirst,
   toLedgerItem,
+  toLedgerRow,
   toSessionItems,
 } from "../src/ledger.js";
 import type { CallMetrics, LedgerRow } from "../src/types.js";
+import type { VisitorTrace } from "../src/visitor.js";
+
+const trace: VisitorTrace = {
+  visitor_id: "v-0123456789abcdef0123456789abcdef",
+  visitor_id_source: "cookie",
+  visitor_ip_hash: "8f14e45fceea167a",
+  visitor_user_agent: "Mozilla/5.0 (Macintosh)",
+  visitor_session_id: "s-abcdef1234",
+};
 
 const at = new Date("2026-08-11T10:30:00.000Z");
 
@@ -59,6 +69,34 @@ describe("toLedgerItem", () => {
     );
     expect(item.resolvedModel).toBe("gloo-google-gemini-2.5-flash");
   });
+
+  it("attaches the visitor trace and lets it expire with the row", () => {
+    const item = toLedgerItem(metrics, at, trace);
+
+    expect(item.visitor_id).toBe(trace.visitor_id);
+    expect(item.visitor_id_source).toBe("cookie");
+    expect(item.visitor_ip_hash).toBe("8f14e45fceea167a");
+    expect(item.visitor_user_agent).toBe("Mozilla/5.0 (Macintosh)");
+    expect(item.visitor_session_id).toBe("s-abcdef1234");
+    expect(item.expires_at).toBe(
+      Math.floor(at.getTime() / 1000) + LEDGER_TTL_SECONDS
+    );
+  });
+
+  it("writes a row with no visitor attributes when there is no trace", () => {
+    const item = toLedgerItem(metrics, at);
+
+    expect(item.visitor_id).toBeUndefined();
+    expect(item.visitor_ip_hash).toBeUndefined();
+  });
+});
+
+describe("toLedgerRow", () => {
+  it("keeps the visitor trace and the key attributes off the wire", () => {
+    const row = toLedgerRow(toLedgerItem(metrics, at, trace));
+
+    expect(row).toEqual({ ...metrics, timestamp: at.toISOString() });
+  });
 });
 
 describe("toSessionItems", () => {
@@ -83,6 +121,28 @@ describe("toSessionItems", () => {
       Math.floor(at.getTime() / 1000) + SESSION_TTL_SECONDS
     );
     expect(SESSION_TTL_SECONDS).toBeLessThan(LEDGER_TTL_SECONDS);
+  });
+
+  it("tags conversation rows with the visitor and when they were seen", () => {
+    const items = toSessionItems("session-abc12345", messages, at, trace);
+
+    expect(items[0]?.visitor_id).toBe(trace.visitor_id);
+    expect(items[0]?.visitor_ip_hash).toBe("8f14e45fceea167a");
+    expect(items[0]?.visitor_seen_at).toBe(at.toISOString());
+  });
+
+  it("does not repeat the session id, which is already the partition key", () => {
+    const [first] = toSessionItems("session-abc12345", messages, at, trace);
+
+    expect(first?.visitor_session_id).toBeUndefined();
+    expect(first?.pk).toBe("SESSION#session-abc12345");
+  });
+
+  it("writes plain message rows when there is no trace", () => {
+    const [first] = toSessionItems("session-abc12345", messages, at);
+
+    expect(first?.visitor_id).toBeUndefined();
+    expect(first?.content).toBe("hello");
   });
 });
 
